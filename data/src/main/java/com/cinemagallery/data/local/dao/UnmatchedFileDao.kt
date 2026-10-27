@@ -9,8 +9,11 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UnmatchedFileDao {
-    @Query("SELECT * FROM unmatched_files WHERE status != 'IGNORED' ORDER BY fileName ASC")
+    @Query("SELECT * FROM unmatched_files WHERE status = 'PENDING' ORDER BY fileName ASC")
     fun getUnmatchedFiles(): Flow<List<UnmatchedFileEntity>>
+
+    @Query("SELECT * FROM unmatched_files WHERE id = :id LIMIT 1")
+    suspend fun getUnmatchedFileById(id: String): UnmatchedFileEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertUnmatchedFiles(files: List<UnmatchedFileEntity>)
