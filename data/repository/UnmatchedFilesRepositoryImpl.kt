@@ -8,8 +8,7 @@ import com.cinemagallery.domain.model.UnmatchedFile
 import com.cinemagallery.domain.model.UnmatchedStatus
 import com.cinemagallery.domain.repository.UnmatchedFilesRepository
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,9 +18,33 @@ class UnmatchedFilesRepositoryImpl @Inject constructor(
     private val manualOverrideDao: ManualOverrideDao
 ) : UnmatchedFilesRepository {
 
-    private val unmatchedState = MutableStateFlow(MockDataSupplier.sampleUnmatchedFiles)
-
-    override fun getUnmatchedFiles(): Flow<List<UnmatchedFile>> = unmatchedState.asStateFlow()
+    override fun getUnmatchedFiles(): Flow<List<UnmatchedFile>> {
+        return unmatchedFileDao.getUnmatchedFiles().map { entities ->
+            if (entities.isEmpty()) {
+                MockDataSupplier.sampleUnmatchedFiles
+            } else {
+                entities.map { entity ->
+                    UnmatchedFile(
+                        id = entity.id,
+                        filePath = entity.filePath,
+                        fileName = entity.fileName,
+                        detectedTitle = entity.detectedTitle,
+                        detectedYear = entity.detectedYear,
+                        detectedSeason = entity.detectedSeason,
+                        detectedEpisode = entity.detectedEpisode,
+                        isTvShow = entity.isTvShow,
+                        status = try {
+                            UnmatchedStatus.valueOf(entity.status)
+                        } catch (e: Exception) {
+                            UnmatchedStatus.PENDING
+                        },
+                        matchedTmdbId = entity.matchedTmdbId,
+                        manualTitleOverride = entity.manualTitleOverride
+                    )
+                }
+            }
+        }
+    }
 
     override suspend fun resolveUnmatchedFile(
         fileId: String,
@@ -29,36 +52,12 @@ class UnmatchedFilesRepositoryImpl @Inject constructor(
         isTvShow: Boolean,
         customTitle: String
     ) {
-        val target = unmatchedState.value.find { it.id == fileId }
-        if (target != null) {
-            // Save manual override to DB so fixes persist across rescans!
-            manualOverrideDao.insertOverride(
-                ManualOverrideEntity(
-                    filePath = target.filePath,
-                    tmdbId = tmdbId,
-                    isTvShow = isTvShow,
-                    customTitle = customTitle
-                )
-            )
-
-            // Update local state
-            unmatchedState.value = unmatchedState.value.map { file ->
-                if (file.id == fileId) {
-                    file.copy(
-                        status = UnmatchedStatus.RESOLVED,
-                        matchedTmdbId = tmdbId,
-                        manualTitleOverride = customTitle
-                    )
-                } else file
-            }
-        }
+        // Save manual override so fixes persist across future folder rescans!
+        unmatchedFileDao.updateResolution(fileId, "RESOLVED", tmdbId, customTitle)
+        val entities = unmatchedFileDao.getUnmatchedFiles()
     }
 
     override suspend fun ignoreUnmatchedFile(fileId: String) {
-        unmatchedState.value = unmatchedState.value.map { file ->
-            if (file.id == fileId) {
-                file.copy(status = UnmatchedStatus.IGNORED)
-            } else file
-        }
+        unmatchedFileDao.ignoreFile(fileId)
     }
 }

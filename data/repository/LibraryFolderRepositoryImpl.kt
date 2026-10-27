@@ -1,50 +1,75 @@
 package com.cinemagallery.data.repository
 
 import com.cinemagallery.data.local.dao.FolderDao
+import com.cinemagallery.data.local.entity.FolderEntity
 import com.cinemagallery.data.mock.MockDataSupplier
+import com.cinemagallery.data.scanner.SafFolderScanner
 import com.cinemagallery.domain.model.LibraryFolder
 import com.cinemagallery.domain.model.ScanProgress
 import com.cinemagallery.domain.repository.LibraryFolderRepository
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class LibraryFolderRepositoryImpl @Inject constructor(
-    private val folderDao: FolderDao
+    private val folderDao: FolderDao,
+    private val scanner: SafFolderScanner
 ) : LibraryFolderRepository {
 
-    private val foldersState = MutableStateFlow(MockDataSupplier.sampleFolders)
-
-    override fun getFolders(): Flow<List<LibraryFolder>> = foldersState.asStateFlow()
+    override fun getFolders(): Flow<List<LibraryFolder>> {
+        return folderDao.getAllFolders().map { entities ->
+            if (entities.isEmpty()) {
+                MockDataSupplier.sampleFolders
+            } else {
+                entities.map { entity ->
+                    LibraryFolder(
+                        uriString = entity.uriString,
+                        displayName = entity.displayName,
+                        totalFilesFound = entity.totalFilesFound,
+                        lastScannedTimeFormatted = if (entity.lastScannedTimestamp > 0) {
+                            "Scanned recently"
+                        } else "Not scanned yet"
+                    )
+                }
+            }
+        }
+    }
 
     override suspend fun addFolder(uriString: String, displayName: String) {
-        val newFolder = LibraryFolder(
-            uriString = uriString,
-            displayName = displayName,
-            totalFilesFound = 0,
-            lastScannedTimeFormatted = "Just added"
+        folderDao.insertFolder(
+            FolderEntity(
+                uriString = uriString,
+                displayName = displayName,
+                totalFilesFound = 0,
+                lastScannedTimestamp = System.currentTimeMillis()
+            )
         )
-        foldersState.value = foldersState.value + newFolder
     }
 
     override suspend fun removeFolder(uriString: String) {
-        foldersState.value = foldersState.value.filter { it.uriString != uriString }
+        folderDao.deleteFolder(uriString)
     }
 
-    override fun scanFolders(): Flow<ScanProgress> = flow {
-        emit(ScanProgress(isScanning = true, currentFile = "Initializing scan...", filesProcessed = 0, totalFiles = 10))
-        delay(600)
-        emit(ScanProgress(isScanning = true, currentFile = "Scanning Interstellar.2014.mkv", filesProcessed = 3, totalFiles = 10))
-        delay(600)
-        emit(ScanProgress(isScanning = true, currentFile = "Scanning Breaking Bad S01E01.mkv", filesProcessed = 7, totalFiles = 10))
-        delay(600)
-        emit(ScanProgress(isScanning = true, currentFile = "Parsing metadata...", filesProcessed = 10, totalFiles = 10))
-        delay(400)
-        emit(ScanProgress(isScanning = false, currentFile = "", filesProcessed = 10, totalFiles = 10))
+    override fun scanFolders(): Flow<ScanProgress> {
+        return flow {
+            val entities = folderDao.getAllFolders()
+            // Scan each configured folder sequentially
+            folderDao.getAllFolders().map { list ->
+                if (list.isEmpty()) {
+                    emit(ScanProgress(isScanning = false, currentFile = "No folders added. Add a folder in Settings."))
+                } else {
+                    for (folder in list) {
+                        scanner.scanFolder(folder.uriString).collect { progress ->
+                            emit(progress)
+                        }
+                    }
+                }
+            }
+        }.flatMapLatest { flowOf(ScanProgress(isScanning = false, currentFile = "Scan completed")) }
     }
 }
