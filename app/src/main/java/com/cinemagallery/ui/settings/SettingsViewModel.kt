@@ -3,6 +3,7 @@ package com.cinemagallery.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cinemagallery.domain.model.LibraryFolder
+import com.cinemagallery.domain.model.MediaItem
 import com.cinemagallery.domain.model.ScanProgress
 import com.cinemagallery.domain.repository.LibraryFolderRepository
 import com.cinemagallery.domain.repository.TmdbRepository
@@ -19,6 +20,10 @@ data class SettingsUiState(
     val folders: List<LibraryFolder> = emptyList(),
     val scanProgress: ScanProgress = ScanProgress(isScanning = false),
     val isTmdbApiKeyConfigured: Boolean = false,
+    val testQuery: String = "Interstellar",
+    val testResults: List<MediaItem.Movie> = emptyList(),
+    val isTestSearching: Boolean = false,
+    val testError: String? = null,
     val isLoading: Boolean = true
 )
 
@@ -43,6 +48,9 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val hasKey = tmdbRepository.getApiKeyStatus()
             _uiState.value = _uiState.value.copy(isTmdbApiKeyConfigured = hasKey)
+            if (hasKey) {
+                testSearchTmdb()
+            }
         }
     }
 
@@ -65,5 +73,30 @@ class SettingsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(scanProgress = progress)
             }
             .launchIn(viewModelScope)
+    }
+
+    fun onTestQueryChange(query: String) {
+        _uiState.value = _uiState.value.copy(testQuery = query)
+    }
+
+    fun testSearchTmdb() {
+        val query = _uiState.value.testQuery.trim()
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isTestSearching = true, testError = null, testResults = emptyList())
+            val result = tmdbRepository.searchMovies(query)
+            result.onSuccess { movies ->
+                _uiState.value = _uiState.value.copy(
+                    testResults = movies,
+                    isTestSearching = false,
+                    testError = if (movies.isEmpty()) "No movies found on TMDB for '$query'" else null
+                )
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(
+                    isTestSearching = false,
+                    testError = "TMDB API Error: ${error.localizedMessage ?: "Invalid API key or network error"}"
+                )
+            }
+        }
     }
 }
