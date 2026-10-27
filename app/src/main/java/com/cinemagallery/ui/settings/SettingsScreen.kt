@@ -1,5 +1,6 @@
 package com.cinemagallery.ui.settings
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,11 +65,15 @@ fun SettingsScreen(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         if (uri != null) {
-            // Persist SAF permission across app launches
-            val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-            context.contentResolver.takePersistableUriPermission(uri, flags)
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
 
-            val displayName = uri.lastPathSegment?.substringAfterLast(':') ?: "Picked Folder"
+            val rawName = uri.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/')
+            val displayName = if (!rawName.isNullOrBlank()) rawName else "Picked Folder"
             viewModel.addFolder(uri.toString(), displayName)
         }
     }

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.cinemagallery.data.local.CinemaDatabase
 import com.cinemagallery.data.local.entity.EpisodeEntity
+import com.cinemagallery.data.local.entity.FolderEntity
 import com.cinemagallery.data.local.entity.MovieEntity
 import com.cinemagallery.data.local.entity.SeasonEntity
 import com.cinemagallery.data.local.entity.TvShowEntity
@@ -15,8 +16,11 @@ import com.cinemagallery.domain.model.ScanProgress
 import com.cinemagallery.domain.parser.FileNameParser
 import com.cinemagallery.domain.repository.TmdbRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -42,138 +46,162 @@ class SafFolderScanner @Inject constructor(
     )
 
     fun scanFolder(uriString: String): Flow<ScanProgress> = flow {
-        val rootUri = Uri.parse(uriString)
-        val rootDoc = DocumentFile.fromTreeUri(context, rootUri)
+        emit(ScanProgress(isScanning = true, currentFile = "Opening folder...", filesProcessed = 0, totalFiles = 0))
 
-        if (rootDoc == null || !rootDoc.exists() || !rootDoc.isDirectory) {
-            emit(ScanProgress(isScanning = false, currentFile = "Folder unavailable or permission revoked"))
-            return@flow
-        }
+        try {
+            val rootUri = Uri.parse(uriString)
+            val rootDoc = withContext(Dispatchers.IO) {
+                DocumentFile.fromTreeUri(context, rootUri)
+            }
 
-        emit(ScanProgress(isScanning = true, currentFile = "Discovering files...", filesProcessed = 0, totalFiles = 0))
+            if (rootDoc == null || !rootDoc.exists() || !rootDoc.isDirectory) {
+                emit(ScanProgress(isScanning = false, currentFile = "Folder unavailable or permission revoked"))
+                return@flow
+            }
 
-        val videoFiles = mutableListOf<ScannedVideoFile>()
-        traverseDirectory(rootDoc, videoFiles)
+            emit(ScanProgress(isScanning = true, currentFile = "Discovering files...", filesProcessed = 0, totalFiles = 0))
 
-        val total = videoFiles.size
-        emit(ScanProgress(isScanning = true, currentFile = "Found $total video files", filesProcessed = 0, totalFiles = total))
+            val videoFiles = mutableListOf<ScannedVideoFile>()
+            withContext(Dispatchers.IO) {
+                traverseDirectory(rootDoc, videoFiles)
+            }
 
-        for ((index, file) in videoFiles.withIndex()) {
-            emit(
-                ScanProgress(
-                    isScanning = true,
-                    currentFile = file.fileName,
-                    filesProcessed = index + 1,
-                    totalFiles = total
+            val total = videoFiles.size
+            emit(ScanProgress(isScanning = true, currentFile = "Found $total video files", filesProcessed = 0, totalFiles = total))
+
+            for ((index, file) in videoFiles.withIndex()) {
+                emit(
+                    ScanProgress(
+                        isScanning = true,
+                        currentFile = file.fileName,
+                        filesProcessed = index + 1,
+                        totalFiles = total
+                    )
                 )
-            )
 
-            // 1. Check for persisted manual override first!
-            val manualOverride = db.manualOverrideDao().getOverrideForFile(file.filePath)
+                try {
+                    withContext(Dispatchers.IO) {
+                        // 1. Check for persisted manual override first!
+                        val manualOverride = db.manualOverrideDao().getOverrideForFile(file.filePath)
 
-            if (manualOverride != null) {
-                if (manualOverride.isTvShow) {
-                    val searchResult = tmdbRepository.searchTvShows(manualOverride.customTitle)
-                    val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
-                    insertOrUpdateTvShowEpisode(file, manualOverride.tmdbId, manualOverride.customTitle, file.parsedInfo, match)
-                } else {
-                    val searchResult = tmdbRepository.searchMovies(manualOverride.customTitle)
-                    val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
-                    insertOrUpdateMovie(file, manualOverride.tmdbId, manualOverride.customTitle, match)
+                        if (manualOverride != null) {
+                            if (manualOverride.isTvShow) {
+                                val searchResult = tmdbRepository.searchTvShows(manualOverride.customTitle)
+                                val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
+                                insertOrUpdateTvShowEpisode(file, manualOverride.tmdbId, manualOverride.customTitle, file.parsedInfo, match)
+                            } else {
+                                val searchResult = tmdbRepository.searchMovies(manualOverride.customTitle)
+                                val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
+                                insertOrUpdateMovie(file, manualOverride.tmdbId, manualOverride.customTitle, match)
+                            }
+                            return@withContext
+                        }
+
+                        // 2. Automatic regex parsing
+                        val parsed = file.parsedInfo
+                        val searchTitle = parsed.cleanTitle
+
+                        if (parsed.isTvShow) {
+                            val searchResult = tmdbRepository.searchTvShows(searchTitle, parsed.year)
+                            val matches = searchResult.getOrNull().orEmpty()
+
+                            if (matches.isNotEmpty()) {
+                                val bestMatch = matches.first()
+                                insertOrUpdateTvShowEpisode(file, bestMatch.tmdbId, bestMatch.title, parsed, bestMatch)
+                            } else {
+                                // Unmatched
+                                db.unmatchedFileDao().insertUnmatchedFiles(
+                                    listOf(
+                                        UnmatchedFileEntity(
+                                            id = UUID.randomUUID().toString(),
+                                            filePath = file.filePath,
+                                            fileName = file.fileName,
+                                            detectedTitle = parsed.cleanTitle,
+                                            detectedYear = parsed.year,
+                                            detectedSeason = parsed.seasonNumber,
+                                            detectedEpisode = parsed.episodeNumber,
+                                            isTvShow = true,
+                                            status = "PENDING"
+                                        )
+                                    )
+                                )
+                            }
+                        } else {
+                            val searchResult = tmdbRepository.searchMovies(searchTitle, parsed.year)
+                            val matches = searchResult.getOrNull().orEmpty()
+
+                            if (matches.isNotEmpty()) {
+                                val bestMatch = matches.first()
+                                insertOrUpdateMovie(file, bestMatch.tmdbId, bestMatch.title, bestMatch)
+                            } else {
+                                // Unmatched
+                                db.unmatchedFileDao().insertUnmatchedFiles(
+                                    listOf(
+                                        UnmatchedFileEntity(
+                                            id = UUID.randomUUID().toString(),
+                                            filePath = file.filePath,
+                                            fileName = file.fileName,
+                                            detectedTitle = parsed.cleanTitle,
+                                            detectedYear = parsed.year,
+                                            detectedSeason = null,
+                                            detectedEpisode = null,
+                                            isTvShow = false,
+                                            status = "PENDING"
+                                        )
+                                    )
+                                )
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-                continue
             }
 
-            // 2. Automatic regex parsing
-            val parsed = file.parsedInfo
-            val searchTitle = parsed.cleanTitle
-
-            if (parsed.isTvShow) {
-                val searchResult = tmdbRepository.searchTvShows(searchTitle, parsed.year)
-                val matches = searchResult.getOrNull().orEmpty()
-
-                if (matches.isNotEmpty()) {
-                    val bestMatch = matches.first()
-                    insertOrUpdateTvShowEpisode(file, bestMatch.tmdbId, bestMatch.title, parsed, bestMatch)
-                } else {
-                    // Unmatched
-                    db.unmatchedFileDao().insertUnmatchedFiles(
-                        listOf(
-                            UnmatchedFileEntity(
-                                id = UUID.randomUUID().toString(),
-                                filePath = file.filePath,
-                                fileName = file.fileName,
-                                detectedTitle = parsed.cleanTitle,
-                                detectedYear = parsed.year,
-                                detectedSeason = parsed.seasonNumber,
-                                detectedEpisode = parsed.episodeNumber,
-                                isTvShow = true,
-                                status = "PENDING"
-                            )
-                        )
+            withContext(Dispatchers.IO) {
+                db.folderDao().insertFolder(
+                    FolderEntity(
+                        uriString = uriString,
+                        displayName = rootDoc.name ?: "Scanned Folder",
+                        totalFilesFound = total,
+                        lastScannedTimestamp = System.currentTimeMillis()
                     )
-                }
-            } else {
-                val searchResult = tmdbRepository.searchMovies(searchTitle, parsed.year)
-                val matches = searchResult.getOrNull().orEmpty()
-
-                if (matches.isNotEmpty()) {
-                    val bestMatch = matches.first()
-                    insertOrUpdateMovie(file, bestMatch.tmdbId, bestMatch.title, bestMatch)
-                } else {
-                    // Unmatched
-                    db.unmatchedFileDao().insertUnmatchedFiles(
-                        listOf(
-                            UnmatchedFileEntity(
-                                id = UUID.randomUUID().toString(),
-                                filePath = file.filePath,
-                                fileName = file.fileName,
-                                detectedTitle = parsed.cleanTitle,
-                                detectedYear = parsed.year,
-                                detectedSeason = null,
-                                detectedEpisode = null,
-                                isTvShow = false,
-                                status = "PENDING"
-                            )
-                        )
-                    )
-                }
+                )
             }
+
+            emit(ScanProgress(isScanning = false, currentFile = "Scan completed ($total files)", filesProcessed = total, totalFiles = total))
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emit(ScanProgress(isScanning = false, currentFile = "Scan error: ${e.localizedMessage ?: "Unknown error"}"))
         }
-
-        // Update Folder total files count
-        db.folderDao().insertFolder(
-            com.cinemagallery.data.local.entity.FolderEntity(
-                uriString = uriString,
-                displayName = rootDoc.name ?: "Scanned Folder",
-                totalFilesFound = total,
-                lastScannedTimestamp = System.currentTimeMillis()
-            )
-        )
-
-        emit(ScanProgress(isScanning = false, currentFile = "Scan completed", filesProcessed = total, totalFiles = total))
-    }
+    }.flowOn(Dispatchers.IO)
 
     private fun traverseDirectory(dir: DocumentFile, result: MutableList<ScannedVideoFile>) {
-        for (file in dir.listFiles()) {
-            if (file.isDirectory) {
-                traverseDirectory(file, result)
-            } else if (file.isFile) {
-                val name = file.name ?: continue
-                val ext = name.substringAfterLast('.', "").lowercase()
-                if (ext in supportedVideoExtensions) {
-                    val parsed = parser.parse(name)
-                    result.add(
-                        ScannedVideoFile(
-                            uri = file.uri,
-                            filePath = file.uri.toString(),
-                            fileName = name,
-                            sizeBytes = file.length(),
-                            parsedInfo = parsed
+        try {
+            val files = dir.listFiles()
+            for (file in files) {
+                if (file.isDirectory) {
+                    traverseDirectory(file, result)
+                } else if (file.isFile) {
+                    val name = file.name ?: continue
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    if (ext in supportedVideoExtensions) {
+                        val parsed = parser.parse(name)
+                        result.add(
+                            ScannedVideoFile(
+                                uri = file.uri,
+                                filePath = file.uri.toString(),
+                                fileName = name,
+                                sizeBytes = file.length(),
+                                parsedInfo = parsed
+                            )
                         )
-                    )
+                    }
                 }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
