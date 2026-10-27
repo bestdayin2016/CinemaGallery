@@ -7,6 +7,9 @@
 /.idea/workspace.xml
 .DS_Store
 /build
+/app/build
+/data/build
+/domain/build
 /captures
 .externalNativeBuild
 .cxx
