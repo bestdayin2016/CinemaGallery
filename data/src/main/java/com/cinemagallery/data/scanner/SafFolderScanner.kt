@@ -9,6 +9,7 @@ import com.cinemagallery.data.local.entity.MovieEntity
 import com.cinemagallery.data.local.entity.SeasonEntity
 import com.cinemagallery.data.local.entity.TvShowEntity
 import com.cinemagallery.data.local.entity.UnmatchedFileEntity
+import com.cinemagallery.domain.model.MediaItem
 import com.cinemagallery.domain.model.ParsedFileName
 import com.cinemagallery.domain.model.ScanProgress
 import com.cinemagallery.domain.parser.FileNameParser
@@ -71,11 +72,14 @@ class SafFolderScanner @Inject constructor(
             val manualOverride = db.manualOverrideDao().getOverrideForFile(file.filePath)
 
             if (manualOverride != null) {
-                // User manual fix persisted!
                 if (manualOverride.isTvShow) {
-                    insertOrUpdateTvShow(file, manualOverride.tmdbId, manualOverride.customTitle)
+                    val searchResult = tmdbRepository.searchTvShows(manualOverride.customTitle)
+                    val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
+                    insertOrUpdateTvShowEpisode(file, manualOverride.tmdbId, manualOverride.customTitle, file.parsedInfo, match)
                 } else {
-                    insertOrUpdateMovie(file, manualOverride.tmdbId, manualOverride.customTitle)
+                    val searchResult = tmdbRepository.searchMovies(manualOverride.customTitle)
+                    val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
+                    insertOrUpdateMovie(file, manualOverride.tmdbId, manualOverride.customTitle, match)
                 }
                 continue
             }
@@ -90,7 +94,7 @@ class SafFolderScanner @Inject constructor(
 
                 if (matches.isNotEmpty()) {
                     val bestMatch = matches.first()
-                    insertOrUpdateTvShowEpisode(file, bestMatch.tmdbId, bestMatch.title, parsed)
+                    insertOrUpdateTvShowEpisode(file, bestMatch.tmdbId, bestMatch.title, parsed, bestMatch)
                 } else {
                     // Unmatched
                     db.unmatchedFileDao().insertUnmatchedFiles(
@@ -115,7 +119,7 @@ class SafFolderScanner @Inject constructor(
 
                 if (matches.isNotEmpty()) {
                     val bestMatch = matches.first()
-                    insertOrUpdateMovie(file, bestMatch.tmdbId, bestMatch.title)
+                    insertOrUpdateMovie(file, bestMatch.tmdbId, bestMatch.title, bestMatch)
                 } else {
                     // Unmatched
                     db.unmatchedFileDao().insertUnmatchedFiles(
@@ -136,6 +140,16 @@ class SafFolderScanner @Inject constructor(
                 }
             }
         }
+
+        // Update Folder total files count
+        db.folderDao().insertFolder(
+            com.cinemagallery.data.local.entity.FolderEntity(
+                uriString = uriString,
+                displayName = rootDoc.name ?: "Scanned Folder",
+                totalFilesFound = total,
+                lastScannedTimestamp = System.currentTimeMillis()
+            )
+        )
 
         emit(ScanProgress(isScanning = false, currentFile = "Scan completed", filesProcessed = total, totalFiles = total))
     }
@@ -166,19 +180,20 @@ class SafFolderScanner @Inject constructor(
     private suspend fun insertOrUpdateMovie(
         file: ScannedVideoFile,
         tmdbId: Int,
-        title: String
+        title: String,
+        match: MediaItem.Movie? = null
     ) {
         val movieEntity = MovieEntity(
             id = "movie_$tmdbId",
             tmdbId = tmdbId,
             title = title,
-            year = file.parsedInfo.year,
-            posterPath = null,
-            backdropPath = null,
-            overview = "Local video file: ${file.fileName}",
-            rating = 8.0,
-            genresCsv = "Movie",
-            runtimeMinutes = 120,
+            year = match?.year ?: file.parsedInfo.year,
+            posterPath = match?.posterPath,
+            backdropPath = match?.backdropPath,
+            overview = match?.overview?.ifBlank { "Local video file: ${file.fileName}" } ?: "Local video file: ${file.fileName}",
+            rating = match?.rating ?: 0.0,
+            genresCsv = match?.genres?.joinToString(",") ?: "Movie",
+            runtimeMinutes = match?.runtimeMinutes ?: 120,
             filePath = file.filePath,
             fileSizeFormatted = formatFileSize(file.sizeBytes),
             isWatched = false
@@ -186,34 +201,12 @@ class SafFolderScanner @Inject constructor(
         db.movieDao().insertMovies(listOf(movieEntity))
     }
 
-    private suspend fun insertOrUpdateTvShow(
-        file: ScannedVideoFile,
-        tmdbId: Int,
-        title: String
-    ) {
-        val tvShowEntity = TvShowEntity(
-            id = "tv_$tmdbId",
-            tmdbId = tmdbId,
-            title = title,
-            year = file.parsedInfo.year,
-            posterPath = null,
-            backdropPath = null,
-            overview = "Local TV Show folder",
-            rating = 8.0,
-            genresCsv = "Series",
-            folderPath = file.filePath.substringBeforeLast('/'),
-            seasonsCount = 1,
-            totalEpisodesCount = 1,
-            watchedEpisodesCount = 0
-        )
-        db.tvShowDao().insertTvShows(listOf(tvShowEntity))
-    }
-
     private suspend fun insertOrUpdateTvShowEpisode(
         file: ScannedVideoFile,
         tmdbId: Int,
         showTitle: String,
-        parsed: ParsedFileName
+        parsed: ParsedFileName,
+        match: MediaItem.TvShow? = null
     ) {
         val tvShowId = "tv_$tmdbId"
         val seasonNum = parsed.seasonNumber ?: 1
@@ -224,12 +217,12 @@ class SafFolderScanner @Inject constructor(
             id = tvShowId,
             tmdbId = tmdbId,
             title = showTitle,
-            year = parsed.year,
-            posterPath = null,
-            backdropPath = null,
-            overview = "Series folder scanned from local storage.",
-            rating = 8.5,
-            genresCsv = "Series",
+            year = match?.year ?: parsed.year,
+            posterPath = match?.posterPath,
+            backdropPath = match?.backdropPath,
+            overview = match?.overview?.ifBlank { "Series folder scanned from local storage." } ?: "Series folder scanned from local storage.",
+            rating = match?.rating ?: 0.0,
+            genresCsv = match?.genres?.joinToString(",") ?: "Series",
             folderPath = file.filePath.substringBeforeLast('/'),
             seasonsCount = seasonNum,
             totalEpisodesCount = 1,
@@ -242,7 +235,7 @@ class SafFolderScanner @Inject constructor(
             tvShowId = tvShowId,
             seasonNumber = seasonNum,
             title = "Season $seasonNum",
-            posterPath = null,
+            posterPath = match?.posterPath,
             overview = "Season $seasonNum",
             totalEpisodesCount = 1,
             watchedEpisodesCount = 0
@@ -257,7 +250,7 @@ class SafFolderScanner @Inject constructor(
             episodeNumber = episodeNum,
             title = "Episode $episodeNum",
             overview = file.fileName,
-            stillPath = null,
+            stillPath = match?.backdropPath,
             filePath = file.filePath,
             fileSizeFormatted = formatFileSize(file.sizeBytes),
             runtimeMinutes = 45,

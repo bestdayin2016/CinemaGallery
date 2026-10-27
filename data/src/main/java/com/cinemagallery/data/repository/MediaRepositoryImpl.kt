@@ -2,7 +2,6 @@ package com.cinemagallery.data.repository
 
 import com.cinemagallery.data.local.dao.MovieDao
 import com.cinemagallery.data.local.dao.TvShowDao
-import com.cinemagallery.data.mock.MockDataSupplier
 import com.cinemagallery.domain.model.Episode
 import com.cinemagallery.domain.model.MediaItem
 import com.cinemagallery.domain.model.Season
@@ -20,82 +19,107 @@ class MediaRepositoryImpl @Inject constructor(
 
     override fun getMovies(): Flow<List<MediaItem.Movie>> {
         return movieDao.getAllMovies().map { entities ->
-            if (entities.isEmpty()) {
-                MockDataSupplier.sampleMovies
-            } else {
-                entities.map { entity ->
-                    MediaItem.Movie(
-                        id = entity.id,
-                        tmdbId = entity.tmdbId,
-                        title = entity.title,
-                        year = entity.year,
-                        posterPath = entity.posterPath,
-                        backdropPath = entity.backdropPath,
-                        overview = entity.overview,
-                        rating = entity.rating,
-                        genres = entity.genresCsv.split(',').map { it.trim() }.filter { it.isNotBlank() },
-                        runtimeMinutes = entity.runtimeMinutes,
-                        filePath = entity.filePath,
-                        fileSizeFormatted = entity.fileSizeFormatted,
-                        isWatched = entity.isWatched,
-                        lastPlayedPositionMs = entity.lastPlayedPositionMs
-                    )
-                }
+            entities.map { entity ->
+                MediaItem.Movie(
+                    id = entity.id,
+                    tmdbId = entity.tmdbId,
+                    title = entity.title,
+                    year = entity.year,
+                    posterPath = entity.posterPath,
+                    backdropPath = entity.backdropPath,
+                    overview = entity.overview,
+                    rating = entity.rating,
+                    genres = entity.genresCsv.split(',').map { it.trim() }.filter { it.isNotBlank() },
+                    runtimeMinutes = entity.runtimeMinutes,
+                    filePath = entity.filePath,
+                    fileSizeFormatted = entity.fileSizeFormatted,
+                    isWatched = entity.isWatched,
+                    lastPlayedPositionMs = entity.lastPlayedPositionMs
+                )
             }
         }
     }
 
     override fun getMovieById(id: String): Flow<MediaItem.Movie?> {
-        return getMovies().map { list -> list.find { it.id == id } }
+        return movieDao.getMovieById(id).map { entity ->
+            entity?.let {
+                MediaItem.Movie(
+                    id = it.id,
+                    tmdbId = it.tmdbId,
+                    title = it.title,
+                    year = it.year,
+                    posterPath = it.posterPath,
+                    backdropPath = it.backdropPath,
+                    overview = it.overview,
+                    rating = it.rating,
+                    genres = it.genresCsv.split(',').map { g -> g.trim() }.filter { g -> g.isNotBlank() },
+                    runtimeMinutes = it.runtimeMinutes,
+                    filePath = it.filePath,
+                    fileSizeFormatted = it.fileSizeFormatted,
+                    isWatched = it.isWatched,
+                    lastPlayedPositionMs = it.lastPlayedPositionMs
+                )
+            }
+        }
     }
 
     override fun getTvShows(): Flow<List<MediaItem.TvShow>> {
         return tvShowDao.getAllTvShows().map { entities ->
-            if (entities.isEmpty()) {
-                MockDataSupplier.sampleTvShows
-            } else {
-                entities.map { entity ->
-                    MediaItem.TvShow(
-                        id = entity.id,
-                        tmdbId = entity.tmdbId,
-                        title = entity.title,
-                        year = entity.year,
-                        posterPath = entity.posterPath,
-                        backdropPath = entity.backdropPath,
-                        overview = entity.overview,
-                        rating = entity.rating,
-                        genres = entity.genresCsv.split(',').map { it.trim() }.filter { it.isNotBlank() },
-                        folderPath = entity.folderPath,
-                        seasonsCount = entity.seasonsCount,
-                        totalEpisodesCount = entity.totalEpisodesCount,
-                        watchedEpisodesCount = entity.watchedEpisodesCount
-                    )
-                }
+            entities.map { entity ->
+                MediaItem.TvShow(
+                    id = entity.id,
+                    tmdbId = entity.tmdbId,
+                    title = entity.title,
+                    year = entity.year,
+                    posterPath = entity.posterPath,
+                    backdropPath = entity.backdropPath,
+                    overview = entity.overview,
+                    rating = entity.rating,
+                    genres = entity.genresCsv.split(',').map { it.trim() }.filter { it.isNotBlank() },
+                    folderPath = entity.folderPath,
+                    seasonsCount = entity.seasonsCount,
+                    totalEpisodesCount = entity.totalEpisodesCount,
+                    watchedEpisodesCount = entity.watchedEpisodesCount
+                )
             }
         }
     }
 
     override fun getTvShowById(id: String): Flow<MediaItem.TvShow?> {
-        return getTvShows().map { list -> list.find { it.id == id } }
+        return tvShowDao.getTvShowById(id).map { entity ->
+            entity?.let {
+                MediaItem.TvShow(
+                    id = it.id,
+                    tmdbId = it.tmdbId,
+                    title = it.title,
+                    year = it.year,
+                    posterPath = it.posterPath,
+                    backdropPath = it.backdropPath,
+                    overview = it.overview,
+                    rating = it.rating,
+                    genres = it.genresCsv.split(',').map { g -> g.trim() }.filter { g -> g.isNotBlank() },
+                    folderPath = it.folderPath,
+                    seasonsCount = it.seasonsCount,
+                    totalEpisodesCount = it.totalEpisodesCount,
+                    watchedEpisodesCount = it.watchedEpisodesCount
+                )
+            }
+        }
     }
 
     override fun getSeasonsForShow(tvShowId: String): Flow<List<Season>> {
         return tvShowDao.getSeasonsForShow(tvShowId).map { entities ->
-            if (entities.isEmpty()) {
-                MockDataSupplier.sampleSeasons.filter { it.tvShowId == tvShowId }
-            } else {
-                entities.map { entity ->
-                    Season(
-                        id = entity.id,
-                        tvShowId = entity.tvShowId,
-                        seasonNumber = entity.seasonNumber,
-                        title = entity.title,
-                        posterPath = entity.posterPath,
-                        overview = entity.overview,
-                        totalEpisodesCount = entity.totalEpisodesCount,
-                        watchedEpisodesCount = entity.watchedEpisodesCount
-                    )
-                }
+            entities.map { entity ->
+                Season(
+                    id = entity.id,
+                    tvShowId = entity.tvShowId,
+                    seasonNumber = entity.seasonNumber,
+                    title = entity.title,
+                    posterPath = entity.posterPath,
+                    overview = entity.overview,
+                    totalEpisodesCount = entity.totalEpisodesCount,
+                    watchedEpisodesCount = entity.watchedEpisodesCount
+                )
             }
         }
     }
@@ -105,28 +129,22 @@ class MediaRepositoryImpl @Inject constructor(
         seasonNumber: Int
     ): Flow<List<Episode>> {
         return tvShowDao.getEpisodesForSeason(tvShowId, seasonNumber).map { entities ->
-            if (entities.isEmpty()) {
-                MockDataSupplier.sampleSeasons
-                    .find { it.tvShowId == tvShowId && it.seasonNumber == seasonNumber }
-                    ?.episodes.orEmpty()
-            } else {
-                entities.map { entity ->
-                    Episode(
-                        id = entity.id,
-                        seasonId = entity.seasonId,
-                        tvShowId = entity.tvShowId,
-                        seasonNumber = entity.seasonNumber,
-                        episodeNumber = entity.episodeNumber,
-                        title = entity.title,
-                        overview = entity.overview,
-                        stillPath = entity.stillPath,
-                        filePath = entity.filePath,
-                        fileSizeFormatted = entity.fileSizeFormatted,
-                        runtimeMinutes = entity.runtimeMinutes,
-                        isWatched = entity.isWatched,
-                        lastPlayedPositionMs = entity.lastPlayedPositionMs
-                    )
-                }
+            entities.map { entity ->
+                Episode(
+                    id = entity.id,
+                    seasonId = entity.seasonId,
+                    tvShowId = entity.tvShowId,
+                    seasonNumber = entity.seasonNumber,
+                    episodeNumber = entity.episodeNumber,
+                    title = entity.title,
+                    overview = entity.overview,
+                    stillPath = entity.stillPath,
+                    filePath = entity.filePath,
+                    fileSizeFormatted = entity.fileSizeFormatted,
+                    runtimeMinutes = entity.runtimeMinutes,
+                    isWatched = entity.isWatched,
+                    lastPlayedPositionMs = entity.lastPlayedPositionMs
+                )
             }
         }
     }

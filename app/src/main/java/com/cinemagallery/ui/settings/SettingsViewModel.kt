@@ -49,6 +49,7 @@ class SettingsViewModel @Inject constructor(
     fun addFolder(uriString: String, displayName: String) {
         viewModelScope.launch {
             folderRepository.addFolder(uriString, displayName)
+            startManualRescan()
         }
     }
 

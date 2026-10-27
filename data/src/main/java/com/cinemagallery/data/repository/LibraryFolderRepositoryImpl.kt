@@ -2,15 +2,13 @@ package com.cinemagallery.data.repository
 
 import com.cinemagallery.data.local.dao.FolderDao
 import com.cinemagallery.data.local.entity.FolderEntity
-import com.cinemagallery.data.mock.MockDataSupplier
 import com.cinemagallery.data.scanner.SafFolderScanner
 import com.cinemagallery.domain.model.LibraryFolder
 import com.cinemagallery.domain.model.ScanProgress
 import com.cinemagallery.domain.repository.LibraryFolderRepository
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,19 +21,15 @@ class LibraryFolderRepositoryImpl @Inject constructor(
 
     override fun getFolders(): Flow<List<LibraryFolder>> {
         return folderDao.getAllFolders().map { entities ->
-            if (entities.isEmpty()) {
-                MockDataSupplier.sampleFolders
-            } else {
-                entities.map { entity ->
-                    LibraryFolder(
-                        uriString = entity.uriString,
-                        displayName = entity.displayName,
-                        totalFilesFound = entity.totalFilesFound,
-                        lastScannedTimeFormatted = if (entity.lastScannedTimestamp > 0) {
-                            "Scanned recently"
-                        } else "Not scanned yet"
-                    )
-                }
+            entities.map { entity ->
+                LibraryFolder(
+                    uriString = entity.uriString,
+                    displayName = entity.displayName,
+                    totalFilesFound = entity.totalFilesFound,
+                    lastScannedTimeFormatted = if (entity.lastScannedTimestamp > 0) {
+                        "Last scanned"
+                    } else "Not scanned yet"
+                )
             }
         }
     }
@@ -57,17 +51,17 @@ class LibraryFolderRepositoryImpl @Inject constructor(
 
     override fun scanFolders(): Flow<ScanProgress> {
         return flow {
-            emit(ScanProgress(isScanning = true, currentFile = "Starting scan..."))
-            folderDao.getAllFolders().collect { list ->
-                if (list.isEmpty()) {
-                    emit(ScanProgress(isScanning = false, currentFile = "No folders added. Add a folder in Settings."))
-                } else {
-                    for (folder in list) {
-                        scanner.scanFolder(folder.uriString).collect { progress ->
-                            emit(progress)
-                        }
+            emit(ScanProgress(isScanning = true, currentFile = "Initializing scanner..."))
+            val folders = folderDao.getAllFolders().first()
+            if (folders.isEmpty()) {
+                emit(ScanProgress(isScanning = false, currentFile = "No media folders added. Please add a folder in Settings."))
+            } else {
+                for (folder in folders) {
+                    scanner.scanFolder(folder.uriString).collect { progress ->
+                        emit(progress)
                     }
                 }
+                emit(ScanProgress(isScanning = false, currentFile = "Scan completed"))
             }
         }
     }
