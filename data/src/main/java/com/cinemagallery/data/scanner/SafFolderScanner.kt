@@ -42,7 +42,8 @@ class SafFolderScanner @Inject constructor(
 ) {
 
     private val supportedVideoExtensions = setOf(
-        "mkv", "mp4", "avi", "m4v", "webm", "mov", "wmv", "flv", "ts"
+        "mkv", "mp4", "avi", "m4v", "webm", "mov", "wmv", "flv", "ts",
+        "mpg", "mpeg", "m2ts", "3gp", "vob", "divx", "ogv", "rm", "rmvb", "asf"
     )
 
     fun scanFolder(uriString: String): Flow<ScanProgress> = flow {
@@ -54,12 +55,12 @@ class SafFolderScanner @Inject constructor(
                 DocumentFile.fromTreeUri(context, rootUri)
             }
 
-            if (rootDoc == null || !rootDoc.exists() || !rootDoc.isDirectory) {
+            if (rootDoc == null || !rootDoc.exists()) {
                 emit(ScanProgress(isScanning = false, currentFile = "Folder unavailable or permission revoked"))
                 return@flow
             }
 
-            emit(ScanProgress(isScanning = true, currentFile = "Discovering files...", filesProcessed = 0, totalFiles = 0))
+            emit(ScanProgress(isScanning = true, currentFile = "Discovering files in directory...", filesProcessed = 0, totalFiles = 0))
 
             val videoFiles = mutableListOf<ScannedVideoFile>()
             withContext(Dispatchers.IO) {
@@ -67,6 +68,11 @@ class SafFolderScanner @Inject constructor(
             }
 
             val total = videoFiles.size
+            if (total == 0) {
+                emit(ScanProgress(isScanning = false, currentFile = "Scan finished: 0 video files found in folder", filesProcessed = 0, totalFiles = 0))
+                return@flow
+            }
+
             emit(ScanProgress(isScanning = true, currentFile = "Found $total video files", filesProcessed = 0, totalFiles = total))
 
             for ((index, file) in videoFiles.withIndex()) {
@@ -169,7 +175,7 @@ class SafFolderScanner @Inject constructor(
                 )
             }
 
-            emit(ScanProgress(isScanning = false, currentFile = "Scan completed ($total files)", filesProcessed = total, totalFiles = total))
+            emit(ScanProgress(isScanning = false, currentFile = "Scan completed ($total files found)", filesProcessed = total, totalFiles = total))
 
         } catch (e: Exception) {
             e.printStackTrace()
@@ -183,20 +189,25 @@ class SafFolderScanner @Inject constructor(
             for (file in files) {
                 if (file.isDirectory) {
                     traverseDirectory(file, result)
-                } else if (file.isFile) {
-                    val name = file.name ?: continue
-                    val ext = name.substringAfterLast('.', "").lowercase()
-                    if (ext in supportedVideoExtensions) {
-                        val parsed = parser.parse(name)
-                        result.add(
-                            ScannedVideoFile(
-                                uri = file.uri,
-                                filePath = file.uri.toString(),
-                                fileName = name,
-                                sizeBytes = file.length(),
-                                parsedInfo = parsed
+                } else {
+                    val name = file.name
+                    if (!name.isNullOrBlank()) {
+                        val ext = name.substringAfterLast('.', "").lowercase()
+                        val isVideoExt = ext in supportedVideoExtensions
+                        val isVideoMime = file.type?.lowercase()?.startsWith("video/") == true
+
+                        if (isVideoExt || isVideoMime) {
+                            val parsed = parser.parse(name)
+                            result.add(
+                                ScannedVideoFile(
+                                    uri = file.uri,
+                                    filePath = file.uri.toString(),
+                                    fileName = name,
+                                    sizeBytes = file.length(),
+                                    parsedInfo = parsed
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }

@@ -66,8 +66,14 @@ fun SettingsScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: SecurityException) {
+                try {
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (e2: Exception) {
+                    e2.printStackTrace()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
