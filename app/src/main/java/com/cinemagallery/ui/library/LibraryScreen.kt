@@ -10,13 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
@@ -48,19 +45,42 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.cinemagallery.domain.model.MediaItem
 import com.cinemagallery.domain.model.MediaTypeFilter
 import com.cinemagallery.domain.model.SortOrder
 import com.cinemagallery.ui.components.MediaCard
+import com.cinemagallery.ui.theme.CinemaGalleryTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel,
     onMediaClick: (MediaItem) -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    LibraryContent(
+        state = state,
+        onSearchQueryChange = viewModel::onSearchQueryChange,
+        onMediaTypeSelect = viewModel::onMediaTypeSelect,
+        onSortOrderSelect = viewModel::onSortOrderSelect,
+        onToggleOnlyUnwatched = viewModel::onToggleOnlyUnwatched,
+        onToggleViewMode = viewModel::toggleViewMode,
+        onMediaClick = onMediaClick
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LibraryContent(
+    state: LibraryUiState,
+    onSearchQueryChange: (String) -> Unit,
+    onMediaTypeSelect: (MediaTypeFilter) -> Unit,
+    onSortOrderSelect: (SortOrder) -> Unit,
+    onToggleOnlyUnwatched: () -> Unit,
+    onToggleViewMode: () -> Unit,
+    onMediaClick: (MediaItem) -> Unit
+) {
     var isSearchExpanded by remember { mutableStateOf(false) }
     var isSortMenuExpanded by remember { mutableStateOf(false) }
 
@@ -71,12 +91,12 @@ fun LibraryScreen(
                     if (isSearchExpanded) {
                         OutlinedTextField(
                             value = state.filter.searchQuery,
-                            onValueChange = { viewModel.onSearchQueryChange(it) },
+                            onValueChange = onSearchQueryChange,
                             placeholder = { Text("Search titles or genres...") },
                             singleLine = true,
                             trailingIcon = {
                                 IconButton(onClick = {
-                                    viewModel.onSearchQueryChange("")
+                                    onSearchQueryChange("")
                                     isSearchExpanded = false
                                 }) {
                                     Icon(Icons.Default.Clear, contentDescription = "Close search")
@@ -113,33 +133,33 @@ fun LibraryScreen(
                         DropdownMenuItem(
                             text = { Text("Title (A-Z)") },
                             onClick = {
-                                viewModel.onSortOrderSelect(SortOrder.TITLE_ASC)
+                                onSortOrderSelect(SortOrder.TITLE_ASC)
                                 isSortMenuExpanded = false
                             }
                         )
                         DropdownMenuItem(
                             text = { Text("Title (Z-A)") },
                             onClick = {
-                                viewModel.onSortOrderSelect(SortOrder.TITLE_DESC)
+                                onSortOrderSelect(SortOrder.TITLE_DESC)
                                 isSortMenuExpanded = false
                             }
                         )
                         DropdownMenuItem(
                             text = { Text("Highest Rated") },
                             onClick = {
-                                viewModel.onSortOrderSelect(SortOrder.RATING_DESC)
+                                onSortOrderSelect(SortOrder.RATING_DESC)
                                 isSortMenuExpanded = false
                             }
                         )
                         DropdownMenuItem(
                             text = { Text("Release Year") },
                             onClick = {
-                                viewModel.onSortOrderSelect(SortOrder.YEAR_DESC)
+                                onSortOrderSelect(SortOrder.YEAR_DESC)
                                 isSortMenuExpanded = false
                             }
                         )
                     }
-                    IconButton(onClick = { viewModel.toggleViewMode() }) {
+                    IconButton(onClick = onToggleViewMode) {
                         Icon(
                             imageVector = if (state.isGridView) Icons.Default.ViewList else Icons.Default.GridView,
                             contentDescription = "Toggle view mode"
@@ -157,7 +177,6 @@ fun LibraryScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Filter Chips Bar
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -168,7 +187,7 @@ fun LibraryScreen(
                 item {
                     FilterChip(
                         selected = state.filter.mediaType == MediaTypeFilter.ALL,
-                        onClick = { viewModel.onMediaTypeSelect(MediaTypeFilter.ALL) },
+                        onClick = { onMediaTypeSelect(MediaTypeFilter.ALL) },
                         label = { Text("All Media") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
@@ -179,7 +198,7 @@ fun LibraryScreen(
                 item {
                     FilterChip(
                         selected = state.filter.mediaType == MediaTypeFilter.MOVIES,
-                        onClick = { viewModel.onMediaTypeSelect(MediaTypeFilter.MOVIES) },
+                        onClick = { onMediaTypeSelect(MediaTypeFilter.MOVIES) },
                         label = { Text("Movies") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
@@ -190,7 +209,7 @@ fun LibraryScreen(
                 item {
                     FilterChip(
                         selected = state.filter.mediaType == MediaTypeFilter.TV_SHOWS,
-                        onClick = { viewModel.onMediaTypeSelect(MediaTypeFilter.TV_SHOWS) },
+                        onClick = { onMediaTypeSelect(MediaTypeFilter.TV_SHOWS) },
                         label = { Text("TV Shows") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
@@ -201,7 +220,7 @@ fun LibraryScreen(
                 item {
                     FilterChip(
                         selected = state.filter.onlyUnwatched,
-                        onClick = { viewModel.onToggleOnlyUnwatched() },
+                        onClick = onToggleOnlyUnwatched,
                         label = { Text("Unwatched Only") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
@@ -258,5 +277,54 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun LibraryScreenPreview() {
+    CinemaGalleryTheme {
+        LibraryContent(
+            state = LibraryUiState(
+                mediaItems = listOf(
+                    MediaItem.Movie(
+                        id = "m1",
+                        tmdbId = 157336,
+                        title = "Interstellar",
+                        year = 2014,
+                        posterPath = null,
+                        backdropPath = null,
+                        overview = "Space exploration drama",
+                        rating = 8.6,
+                        genres = listOf("Sci-Fi"),
+                        runtimeMinutes = 169,
+                        filePath = "",
+                        fileSizeFormatted = "3.2 GB",
+                        isWatched = true
+                    ),
+                    MediaItem.TvShow(
+                        id = "tv1",
+                        tmdbId = 1396,
+                        title = "Breaking Bad",
+                        year = 2008,
+                        posterPath = null,
+                        backdropPath = null,
+                        overview = "Crime drama",
+                        rating = 8.9,
+                        genres = listOf("Drama", "Crime"),
+                        folderPath = "",
+                        seasonsCount = 5,
+                        totalEpisodesCount = 62,
+                        watchedEpisodesCount = 45
+                    )
+                )
+            ),
+            onSearchQueryChange = {},
+            onMediaTypeSelect = {},
+            onSortOrderSelect = {},
+            onToggleOnlyUnwatched = {},
+            onToggleViewMode = {},
+            onMediaClick = {}
+        )
     }
 }
