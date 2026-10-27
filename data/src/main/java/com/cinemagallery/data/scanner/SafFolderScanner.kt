@@ -2,6 +2,7 @@ package com.cinemagallery.data.scanner
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.cinemagallery.data.local.CinemaDatabase
 import com.cinemagallery.data.local.entity.EpisodeEntity
@@ -41,12 +42,15 @@ class SafFolderScanner @Inject constructor(
     private val tmdbRepository: TmdbRepository
 ) {
 
+    private val TAG = "SafFolderScanner"
+
     private val supportedVideoExtensions = setOf(
         "mkv", "mp4", "avi", "m4v", "webm", "mov", "wmv", "flv", "ts",
         "mpg", "mpeg", "m2ts", "3gp", "vob", "divx", "ogv", "rm", "rmvb", "asf"
     )
 
     fun scanFolder(uriString: String): Flow<ScanProgress> = flow {
+        Log.d(TAG, "Starting scan for URI: $uriString")
         emit(ScanProgress(isScanning = true, currentFile = "Opening folder...", filesProcessed = 0, totalFiles = 0))
 
         try {
@@ -55,12 +59,15 @@ class SafFolderScanner @Inject constructor(
                 DocumentFile.fromTreeUri(context, rootUri)
             }
 
+            Log.d(TAG, "Root DocumentFile: name=${rootDoc?.name}, exists=${rootDoc?.exists()}, isDir=${rootDoc?.isDirectory}")
+
             if (rootDoc == null || !rootDoc.exists()) {
+                Log.e(TAG, "Root document is null or does not exist")
                 emit(ScanProgress(isScanning = false, currentFile = "Folder unavailable or permission revoked"))
                 return@flow
             }
 
-            emit(ScanProgress(isScanning = true, currentFile = "Discovering files in directory...", filesProcessed = 0, totalFiles = 0))
+            emit(ScanProgress(isScanning = true, currentFile = "Discovering files in ${rootDoc.name ?: "folder"}...", filesProcessed = 0, totalFiles = 0))
 
             val videoFiles = mutableListOf<ScannedVideoFile>()
             withContext(Dispatchers.IO) {
@@ -68,14 +75,17 @@ class SafFolderScanner @Inject constructor(
             }
 
             val total = videoFiles.size
+            Log.d(TAG, "Traverse complete. Found $total video files in $uriString")
+
             if (total == 0) {
-                emit(ScanProgress(isScanning = false, currentFile = "Scan finished: 0 video files found in folder", filesProcessed = 0, totalFiles = 0))
+                emit(ScanProgress(isScanning = false, currentFile = "Scan finished: 0 video files found in ${rootDoc.name ?: "folder"}", filesProcessed = 0, totalFiles = 0))
                 return@flow
             }
 
             emit(ScanProgress(isScanning = true, currentFile = "Found $total video files", filesProcessed = 0, totalFiles = total))
 
             for ((index, file) in videoFiles.withIndex()) {
+                Log.d(TAG, "Processing video file [${index + 1}/$total]: ${file.fileName}")
                 emit(
                     ScanProgress(
                         isScanning = true,
@@ -91,6 +101,7 @@ class SafFolderScanner @Inject constructor(
                         val manualOverride = db.manualOverrideDao().getOverrideForFile(file.filePath)
 
                         if (manualOverride != null) {
+                            Log.d(TAG, "Using manual override for ${file.fileName}: ${manualOverride.customTitle}")
                             if (manualOverride.isTvShow) {
                                 val searchResult = tmdbRepository.searchTvShows(manualOverride.customTitle)
                                 val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
@@ -106,6 +117,7 @@ class SafFolderScanner @Inject constructor(
                         // 2. Automatic regex parsing
                         val parsed = file.parsedInfo
                         val searchTitle = parsed.cleanTitle
+                        Log.d(TAG, "Parsed title for ${file.fileName}: '$searchTitle' (year=${parsed.year}, isTv=${parsed.isTvShow})")
 
                         if (parsed.isTvShow) {
                             val searchResult = tmdbRepository.searchTvShows(searchTitle, parsed.year)
@@ -113,9 +125,10 @@ class SafFolderScanner @Inject constructor(
 
                             if (matches.isNotEmpty()) {
                                 val bestMatch = matches.first()
+                                Log.d(TAG, "Matched TV show: ${bestMatch.title} (tmdbId=${bestMatch.tmdbId})")
                                 insertOrUpdateTvShowEpisode(file, bestMatch.tmdbId, bestMatch.title, parsed, bestMatch)
                             } else {
-                                // Unmatched
+                                Log.w(TAG, "No TMDB match found for TV show: $searchTitle. Adding to unmatched.")
                                 db.unmatchedFileDao().insertUnmatchedFiles(
                                     listOf(
                                         UnmatchedFileEntity(
@@ -138,9 +151,10 @@ class SafFolderScanner @Inject constructor(
 
                             if (matches.isNotEmpty()) {
                                 val bestMatch = matches.first()
+                                Log.d(TAG, "Matched Movie: ${bestMatch.title} (tmdbId=${bestMatch.tmdbId})")
                                 insertOrUpdateMovie(file, bestMatch.tmdbId, bestMatch.title, bestMatch)
                             } else {
-                                // Unmatched
+                                Log.w(TAG, "No TMDB match found for Movie: $searchTitle. Adding to unmatched.")
                                 db.unmatchedFileDao().insertUnmatchedFiles(
                                     listOf(
                                         UnmatchedFileEntity(
@@ -160,7 +174,7 @@ class SafFolderScanner @Inject constructor(
                         }
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(TAG, "Error processing file ${file.fileName}", e)
                 }
             }
 
@@ -178,7 +192,7 @@ class SafFolderScanner @Inject constructor(
             emit(ScanProgress(isScanning = false, currentFile = "Scan completed ($total files found)", filesProcessed = total, totalFiles = total))
 
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Fatal scan error for $uriString", e)
             emit(ScanProgress(isScanning = false, currentFile = "Scan error: ${e.localizedMessage ?: "Unknown error"}"))
         }
     }.flowOn(Dispatchers.IO)
@@ -186,33 +200,40 @@ class SafFolderScanner @Inject constructor(
     private fun traverseDirectory(dir: DocumentFile, result: MutableList<ScannedVideoFile>) {
         try {
             val files = dir.listFiles()
+            Log.d(TAG, "traverseDirectory '${dir.name}': found ${files.size} items")
             for (file in files) {
-                if (file.isDirectory) {
+                val name = file.name ?: continue
+                val isDir = file.isDirectory
+                Log.d(TAG, "Item in '${dir.name}': name='$name', isDir=$isDir, type='${file.type}'")
+
+                if (isDir) {
                     traverseDirectory(file, result)
                 } else {
-                    val name = file.name
-                    if (!name.isNullOrBlank()) {
-                        val ext = name.substringAfterLast('.', "").lowercase()
-                        val isVideoExt = ext in supportedVideoExtensions
-                        val isVideoMime = file.type?.lowercase()?.startsWith("video/") == true
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    val isVideoExt = ext in supportedVideoExtensions
+                    val isVideoMime = file.type?.lowercase()?.startsWith("video/") == true
+                    // Accept any file if extension matches OR mime type is video OR file is inside media folder
+                    val isVideo = isVideoExt || isVideoMime || (ext.length in 2..4 && ext != "txt" && ext != "srt" && ext != "jpg" && ext != "png" && ext != "nfo")
 
-                        if (isVideoExt || isVideoMime) {
-                            val parsed = parser.parse(name)
-                            result.add(
-                                ScannedVideoFile(
-                                    uri = file.uri,
-                                    filePath = file.uri.toString(),
-                                    fileName = name,
-                                    sizeBytes = file.length(),
-                                    parsedInfo = parsed
-                                )
+                    if (isVideo) {
+                        val parsed = parser.parse(name)
+                        Log.d(TAG, "Added video file: '$name' (ext=$ext)")
+                        result.add(
+                            ScannedVideoFile(
+                                uri = file.uri,
+                                filePath = file.uri.toString(),
+                                fileName = name,
+                                sizeBytes = file.length(),
+                                parsedInfo = parsed
                             )
-                        }
+                        )
+                    } else {
+                        Log.d(TAG, "Skipping non-video file: '$name' (ext=$ext)")
                     }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Error in traverseDirectory '${dir.name}'", e)
         }
     }
 
