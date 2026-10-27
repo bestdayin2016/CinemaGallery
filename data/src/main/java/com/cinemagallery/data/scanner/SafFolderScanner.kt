@@ -52,7 +52,7 @@ class SafFolderScanner @Inject constructor(
     )
 
     fun scanFolder(uriString: String): Flow<ScanProgress> = flow {
-        Log.d(TAG, "Tree URI string: $uriString")
+        Log.d(TAG, "Starting scan of $uriString")
         emit(ScanProgress(isScanning = true, currentFile = "Opening folder...", filesProcessed = 0, totalFiles = 0))
 
         try {
@@ -73,9 +73,9 @@ class SafFolderScanner @Inject constructor(
                     scanSafTree(rootUri, videoFiles)
                 }
 
-                // Method 2: Fallback to DocumentFile traversal on original tree URI if method 1 found 0 files
+                // Method 2: Fallback to DocumentFile on original treeUri ONLY
                 if (videoFiles.isEmpty() && rootUri.scheme == "content") {
-                    Log.d(TAG, "Native SAF query yielded 0 files. Trying DocumentFile fallback on original tree URI...")
+                    Log.d(TAG, "Native SAF query yielded 0 files. Trying DocumentFile fallback on original treeUri: $rootUri")
                     val rootDoc = DocumentFile.fromTreeUri(context, rootUri)
                     if (rootDoc != null && rootDoc.exists()) {
                         traverseDocumentFile(rootDoc, videoFiles)
@@ -95,7 +95,7 @@ class SafFolderScanner @Inject constructor(
             }
 
             val total = videoFiles.size
-            Log.d(TAG, "Scan complete for $uriString. Total video files found: $total")
+            Log.d(TAG, "Final number of video files found: $total for $uriString")
 
             if (total == 0) {
                 emit(ScanProgress(isScanning = false, currentFile = "Scan finished: 0 video files found in folder", filesProcessed = 0, totalFiles = 0))
@@ -105,7 +105,7 @@ class SafFolderScanner @Inject constructor(
             emit(ScanProgress(isScanning = true, currentFile = "Found $total video files", filesProcessed = 0, totalFiles = total))
 
             for ((index, file) in videoFiles.withIndex()) {
-                Log.d(TAG, "Processing video [${index + 1}/$total]: ${file.fileName}")
+                Log.d(TAG, "Processing video file [${index + 1}/$total]: ${file.fileName}")
                 emit(
                     ScanProgress(
                         isScanning = true,
@@ -263,7 +263,8 @@ class SafFolderScanner @Inject constructor(
                     Log.d(TAG, "Found -> Doc ID: '$childDocId' | Name: '$name' | MIME: '$mimeType' | isDir: $isDirectory")
 
                     if (isDirectory) {
-                        // Recurse using original treeUri and child document ID
+                        Log.d(TAG, "Recursively entering subfolder: '$name' (childDocId: '$childDocId')")
+                        // ALWAYS pass original treeUri and child document ID
                         scanSafDirectory(treeUri, childDocId, result)
                     } else {
                         val ext = name.substringAfterLast('.', "").lowercase()
@@ -272,7 +273,7 @@ class SafFolderScanner @Inject constructor(
                         val isVideo = isVideoExt || isVideoMime || (ext.length in 2..4 && ext != "txt" && ext != "srt" && ext != "jpg" && ext != "png" && ext != "nfo")
 
                         if (isVideo) {
-                            // ALWAYS pass original treeUri as first parameter
+                            // ALWAYS pass original treeUri and child document ID
                             val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
                             val parsed = parser.parse(name)
                             Log.d(TAG, "ACCEPTED VIDEO -> Name: '$name' | Doc ID: '$childDocId' | Size: $size bytes")
@@ -290,7 +291,7 @@ class SafFolderScanner @Inject constructor(
                         }
                     }
                 }
-            } ?: Log.e(TAG, "Null cursor returned when querying $childrenUri")
+            } ?: Log.e(TAG, "Null cursor returned for childrenUri: $childrenUri")
         } catch (e: Exception) {
             Log.e(TAG, "Error querying SAF directory '$docId'", e)
         }

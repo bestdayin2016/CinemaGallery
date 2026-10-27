@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -79,20 +78,19 @@ fun SettingsScreen(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         if (uri != null) {
+            val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             try {
-                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-            } catch (e: SecurityException) {
-                try {
-                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                } catch (e2: Exception) {
-                    e2.printStackTrace()
-                }
+                Log.d("SafScan", "takePersistableUriPermission called for URI string: ${uri}")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("SafScan", "takePersistableUriPermission failed for: ${uri}", e)
             }
 
-            // Quick one-level test query right after taking permission
+            val persistedList = context.contentResolver.persistedUriPermissions
+            val isPersisted = persistedList.any { it.uri == uri }
+            Log.d("SafScan", "Is URI persisted in persistedUriPermissions? $isPersisted (Total persisted count: ${persistedList.size})")
+
+            // One-level test query before saving to DB
             try {
                 val treeDocId = DocumentsContract.getTreeDocumentId(uri)
                 val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(uri, treeDocId)
@@ -104,7 +102,7 @@ fun SettingsScreen(
                     Log.d("SafScan", "Immediate test query for treeDocId '$treeDocId' returned ${cursor.count} rows")
                 } ?: Log.e("SafScan", "Immediate test query returned NULL cursor for $childrenUri")
             } catch (e: Exception) {
-                Log.e("SafScan", "Immediate test query failed with exception", e)
+                Log.e("SafScan", "Immediate test query failed with exception for $uri", e)
             }
 
             val rawName = uri.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/')
