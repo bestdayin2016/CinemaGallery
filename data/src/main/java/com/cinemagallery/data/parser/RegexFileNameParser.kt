@@ -30,21 +30,29 @@ class RegexFileNameParser @Inject constructor() : FileNameParser {
         val codecMatch = codecRegex.find(clean)
         val codec = codecMatch?.value
 
-        // Detect TV Show patterns e.g. S01E02 or 1x02 or S01.E02
-        val tvShowRegex = Regex("(?i)\\bS(?<season>\\d{1,2})[ .]?E(?<episode>\\d{1,2})\\b|(?<season>\\d{1,2})x(?<episode>\\d{1,2})")
-        val tvMatch = tvShowRegex.find(clean)
-
         var seasonNumber: Int? = null
         var episodeNumber: Int? = null
         var isTvShow = false
 
-        if (tvMatch != null) {
-            isTvShow = true
-            seasonNumber = tvMatch.groups["season"]?.value?.toIntOrNull()
-            episodeNumber = tvMatch.groups["episode"]?.value?.toIntOrNull()
+        // Detect TV Show patterns e.g. S01E02 or S1E2 or S01.E02
+        val s00e00Regex = Regex("(?i)\\bS(\\d{1,2})[ .]?E(\\d{1,2})\\b")
+        val s00Match = s00e00Regex.find(clean)
 
-            // Remove TV pattern and everything after it
-            clean = clean.substring(0, tvMatch.range.first).trim()
+        if (s00Match != null) {
+            isTvShow = true
+            seasonNumber = s00Match.groupValues.getOrNull(1)?.toIntOrNull()
+            episodeNumber = s00Match.groupValues.getOrNull(2)?.toIntOrNull()
+            clean = clean.substring(0, s00Match.range.first).trim()
+        } else {
+            // Detect TV Show pattern e.g. 1x02 or 01x02
+            val nxnRegex = Regex("(?i)\\b(\\d{1,2})x(\\d{1,2})\\b")
+            val nxnMatch = nxnRegex.find(clean)
+            if (nxnMatch != null) {
+                isTvShow = true
+                seasonNumber = nxnMatch.groupValues.getOrNull(1)?.toIntOrNull()
+                episodeNumber = nxnMatch.groupValues.getOrNull(2)?.toIntOrNull()
+                clean = clean.substring(0, nxnMatch.range.first).trim()
+            }
         }
 
         // Detect Year (e.g., 19xx or 20xx)
