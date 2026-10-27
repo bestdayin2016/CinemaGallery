@@ -4,8 +4,8 @@
 A personal-use Android movie and TV series catalogue application built with modern **Android Architecture Components**, **Jetpack Compose**, and **Clean Architecture**.
 
 
-<img width="1536" height="1024" alt="CinemaGallery README Branding Sheet" src="https://github.com/user-attachments/assets/8b0aa558-7c39-4d43-94bc-7289eecd2ef0" />
 
+<img width="1774" height="887" alt="CinemaGallery README Branding Sheet" src="https://github.com/user-attachments/assets/63c0ac70-01fc-430f-ae4d-f0e2a73343c7" />
 
 
 ---
