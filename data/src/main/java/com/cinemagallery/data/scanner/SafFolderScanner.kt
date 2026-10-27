@@ -2,6 +2,7 @@ package com.cinemagallery.data.scanner
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.cinemagallery.data.local.CinemaDatabase
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -55,37 +57,46 @@ class SafFolderScanner @Inject constructor(
 
         try {
             val rootUri = Uri.parse(uriString)
-            val rootDoc = withContext(Dispatchers.IO) {
-                DocumentFile.fromTreeUri(context, rootUri)
-            }
-
-            Log.d(TAG, "Root DocumentFile: name=${rootDoc?.name}, exists=${rootDoc?.exists()}, isDir=${rootDoc?.isDirectory}")
-
-            if (rootDoc == null || !rootDoc.exists()) {
-                Log.e(TAG, "Root document is null or does not exist")
-                emit(ScanProgress(isScanning = false, currentFile = "Folder unavailable or permission revoked"))
-                return@flow
-            }
-
-            emit(ScanProgress(isScanning = true, currentFile = "Discovering files in ${rootDoc.name ?: "folder"}...", filesProcessed = 0, totalFiles = 0))
-
             val videoFiles = mutableListOf<ScannedVideoFile>()
+
+            emit(ScanProgress(isScanning = true, currentFile = "Discovering files in directory...", filesProcessed = 0, totalFiles = 0))
+
             withContext(Dispatchers.IO) {
-                traverseDirectory(rootDoc, videoFiles)
+                // Method 1: Direct DocumentsContract ContentResolver query (Native SAF)
+                if (rootUri.scheme == "content") {
+                    scanSafTree(rootUri, videoFiles)
+                }
+
+                // Method 2: Fallback to DocumentFile traversal if DocumentsContract returned 0
+                if (videoFiles.isEmpty() && rootUri.scheme == "content") {
+                    val rootDoc = DocumentFile.fromTreeUri(context, rootUri)
+                    if (rootDoc != null && rootDoc.exists()) {
+                        traverseDocumentFile(rootDoc, videoFiles)
+                    }
+                }
+
+                // Method 3: Fallback to java.io.File traversal if URI represents file/path
+                if (videoFiles.isEmpty() && (rootUri.scheme == "file" || uriString.startsWith("/"))) {
+                    val path = rootUri.path ?: uriString
+                    val fileDir = File(path)
+                    if (fileDir.exists() && fileDir.isDirectory) {
+                        traverseIoFile(fileDir, videoFiles)
+                    }
+                }
             }
 
             val total = videoFiles.size
-            Log.d(TAG, "Traverse complete. Found $total video files in $uriString")
+            Log.d(TAG, "Scan complete for $uriString. Found $total video files.")
 
             if (total == 0) {
-                emit(ScanProgress(isScanning = false, currentFile = "Scan finished: 0 video files found in ${rootDoc.name ?: "folder"}", filesProcessed = 0, totalFiles = 0))
+                emit(ScanProgress(isScanning = false, currentFile = "Scan finished: 0 video files found in folder", filesProcessed = 0, totalFiles = 0))
                 return@flow
             }
 
             emit(ScanProgress(isScanning = true, currentFile = "Found $total video files", filesProcessed = 0, totalFiles = total))
 
             for ((index, file) in videoFiles.withIndex()) {
-                Log.d(TAG, "Processing video file [${index + 1}/$total]: ${file.fileName}")
+                Log.d(TAG, "Processing video [${index + 1}/$total]: ${file.fileName}")
                 emit(
                     ScanProgress(
                         isScanning = true,
@@ -101,7 +112,7 @@ class SafFolderScanner @Inject constructor(
                         val manualOverride = db.manualOverrideDao().getOverrideForFile(file.filePath)
 
                         if (manualOverride != null) {
-                            Log.d(TAG, "Using manual override for ${file.fileName}: ${manualOverride.customTitle}")
+                            Log.d(TAG, "Applying manual override for ${file.fileName}: ${manualOverride.customTitle}")
                             if (manualOverride.isTvShow) {
                                 val searchResult = tmdbRepository.searchTvShows(manualOverride.customTitle)
                                 val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
@@ -128,7 +139,7 @@ class SafFolderScanner @Inject constructor(
                                 Log.d(TAG, "Matched TV show: ${bestMatch.title} (tmdbId=${bestMatch.tmdbId})")
                                 insertOrUpdateTvShowEpisode(file, bestMatch.tmdbId, bestMatch.title, parsed, bestMatch)
                             } else {
-                                Log.w(TAG, "No TMDB match found for TV show: $searchTitle. Adding to unmatched.")
+                                Log.w(TAG, "No TMDB match for TV show: $searchTitle. Adding to unmatched.")
                                 db.unmatchedFileDao().insertUnmatchedFiles(
                                     listOf(
                                         UnmatchedFileEntity(
@@ -154,7 +165,7 @@ class SafFolderScanner @Inject constructor(
                                 Log.d(TAG, "Matched Movie: ${bestMatch.title} (tmdbId=${bestMatch.tmdbId})")
                                 insertOrUpdateMovie(file, bestMatch.tmdbId, bestMatch.title, bestMatch)
                             } else {
-                                Log.w(TAG, "No TMDB match found for Movie: $searchTitle. Adding to unmatched.")
+                                Log.w(TAG, "No TMDB match for Movie: $searchTitle. Adding to unmatched.")
                                 db.unmatchedFileDao().insertUnmatchedFiles(
                                     listOf(
                                         UnmatchedFileEntity(
@@ -178,11 +189,14 @@ class SafFolderScanner @Inject constructor(
                 }
             }
 
+            val folderName = rootUri.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/')
+                ?.ifBlank { "Scanned Folder" } ?: "Scanned Folder"
+
             withContext(Dispatchers.IO) {
                 db.folderDao().insertFolder(
                     FolderEntity(
                         uriString = uriString,
-                        displayName = rootDoc.name ?: "Scanned Folder",
+                        displayName = folderName,
                         totalFilesFound = total,
                         lastScannedTimestamp = System.currentTimeMillis()
                     )
@@ -197,27 +211,87 @@ class SafFolderScanner @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    private fun traverseDirectory(dir: DocumentFile, result: MutableList<ScannedVideoFile>) {
+    // Method 1: Native SAF DocumentsContract Cursor Query
+    private fun scanSafTree(treeUri: Uri, result: MutableList<ScannedVideoFile>) {
+        try {
+            val treeDocId = DocumentsContract.getTreeDocumentId(treeUri) ?: return
+            Log.d(TAG, "scanSafTree treeDocId='$treeDocId'")
+            scanSafDirectory(treeUri, treeDocId, result)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in scanSafTree", e)
+        }
+    }
+
+    private fun scanSafDirectory(treeUri: Uri, docId: String, result: MutableList<ScannedVideoFile>) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE
+        )
+
+        try {
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val sizeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+
+                while (cursor.moveToNext()) {
+                    val childDocId = cursor.getString(idIndex) ?: continue
+                    val name = cursor.getString(nameIndex) ?: continue
+                    val mimeType = cursor.getString(mimeIndex) ?: ""
+                    val size = if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L
+
+                    val isDirectory = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+
+                    if (isDirectory) {
+                        scanSafDirectory(treeUri, childDocId, result)
+                    } else {
+                        val ext = name.substringAfterLast('.', "").lowercase()
+                        val isVideoExt = ext in supportedVideoExtensions
+                        val isVideoMime = mimeType.lowercase().startsWith("video/")
+                        val isVideo = isVideoExt || isVideoMime || (ext.length in 2..4 && ext != "txt" && ext != "srt" && ext != "jpg" && ext != "png" && ext != "nfo")
+
+                        if (isVideo) {
+                            val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                            val parsed = parser.parse(name)
+                            Log.d(TAG, "SafNative found video: '$name' (size=$size)")
+                            result.add(
+                                ScannedVideoFile(
+                                    uri = fileUri,
+                                    filePath = fileUri.toString(),
+                                    fileName = name,
+                                    sizeBytes = size,
+                                    parsedInfo = parsed
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error querying SAF directory '$docId'", e)
+        }
+    }
+
+    // Method 2: DocumentFile Traversal
+    private fun traverseDocumentFile(dir: DocumentFile, result: MutableList<ScannedVideoFile>) {
         try {
             val files = dir.listFiles()
-            Log.d(TAG, "traverseDirectory '${dir.name}': found ${files.size} items")
             for (file in files) {
                 val name = file.name ?: continue
-                val isDir = file.isDirectory
-                Log.d(TAG, "Item in '${dir.name}': name='$name', isDir=$isDir, type='${file.type}'")
-
-                if (isDir) {
-                    traverseDirectory(file, result)
+                if (file.isDirectory) {
+                    traverseDocumentFile(file, result)
                 } else {
                     val ext = name.substringAfterLast('.', "").lowercase()
                     val isVideoExt = ext in supportedVideoExtensions
                     val isVideoMime = file.type?.lowercase()?.startsWith("video/") == true
-                    // Accept any file if extension matches OR mime type is video OR file is inside media folder
                     val isVideo = isVideoExt || isVideoMime || (ext.length in 2..4 && ext != "txt" && ext != "srt" && ext != "jpg" && ext != "png" && ext != "nfo")
 
                     if (isVideo) {
                         val parsed = parser.parse(name)
-                        Log.d(TAG, "Added video file: '$name' (ext=$ext)")
                         result.add(
                             ScannedVideoFile(
                                 uri = file.uri,
@@ -227,13 +301,40 @@ class SafFolderScanner @Inject constructor(
                                 parsedInfo = parsed
                             )
                         )
-                    } else {
-                        Log.d(TAG, "Skipping non-video file: '$name' (ext=$ext)")
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in traverseDirectory '${dir.name}'", e)
+            Log.e(TAG, "Error in traverseDocumentFile", e)
+        }
+    }
+
+    // Method 3: java.io.File Traversal
+    private fun traverseIoFile(dir: File, result: MutableList<ScannedVideoFile>) {
+        try {
+            val files = dir.listFiles() ?: return
+            for (file in files) {
+                if (file.isDirectory) {
+                    traverseIoFile(file, result)
+                } else if (file.isFile) {
+                    val name = file.name
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    if (ext in supportedVideoExtensions) {
+                        val parsed = parser.parse(name)
+                        result.add(
+                            ScannedVideoFile(
+                                uri = Uri.fromFile(file),
+                                filePath = file.absolutePath,
+                                fileName = name,
+                                sizeBytes = file.length(),
+                                parsedInfo = parsed
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in traverseIoFile", e)
         }
     }
 
