@@ -2,6 +2,8 @@ package com.cinemagallery.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -65,17 +67,27 @@ fun SettingsScreen(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         if (uri != null) {
+            val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
             try {
-                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-            } catch (e: SecurityException) {
-                try {
-                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                } catch (e2: Exception) {
-                    e2.printStackTrace()
-                }
+                Log.d("SafScan", "Persisted permission taken for URI: $uri with flags: $takeFlags")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("SafScan", "Error taking persistable URI permission for: $uri", e)
+            }
+
+            // Quick one-level test query right after taking permission
+            try {
+                val treeDocId = DocumentsContract.getTreeDocumentId(uri)
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(uri, treeDocId)
+                val projection = arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                )
+                context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                    Log.d("SafScan", "Immediate test query for treeDocId '$treeDocId' returned ${cursor.count} rows")
+                } ?: Log.e("SafScan", "Immediate test query returned NULL cursor for $childrenUri")
+            } catch (e: Exception) {
+                Log.e("SafScan", "Immediate test query failed with exception", e)
             }
 
             val rawName = uri.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/')

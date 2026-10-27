@@ -44,7 +44,7 @@ class SafFolderScanner @Inject constructor(
     private val tmdbRepository: TmdbRepository
 ) {
 
-    private val TAG = "SafFolderScanner"
+    private val TAG = "SafScan"
 
     private val supportedVideoExtensions = setOf(
         "mkv", "mp4", "avi", "m4v", "webm", "mov", "wmv", "flv", "ts",
@@ -52,26 +52,35 @@ class SafFolderScanner @Inject constructor(
     )
 
     fun scanFolder(uriString: String): Flow<ScanProgress> = flow {
-        Log.d(TAG, "Starting scan for URI: $uriString")
+        Log.d(TAG, "Tree URI string: $uriString")
         emit(ScanProgress(isScanning = true, currentFile = "Opening folder...", filesProcessed = 0, totalFiles = 0))
 
         try {
             val rootUri = Uri.parse(uriString)
+
+            // Log whether persistable permission is present
+            val persistedPermissions = context.contentResolver.persistedUriPermissions
+            val hasPermission = persistedPermissions.any { it.uri == rootUri && it.isReadPermission }
+            Log.d(TAG, "Persistable permission present for $rootUri: $hasPermission")
+
             val videoFiles = mutableListOf<ScannedVideoFile>()
 
             emit(ScanProgress(isScanning = true, currentFile = "Discovering files in directory...", filesProcessed = 0, totalFiles = 0))
 
             withContext(Dispatchers.IO) {
-                // Method 1: Direct DocumentsContract ContentResolver query (Native SAF)
+                // Method 1: Native SAF DocumentsContract Cursor Query
                 if (rootUri.scheme == "content") {
                     scanSafTree(rootUri, videoFiles)
                 }
 
-                // Method 2: Fallback to DocumentFile traversal if DocumentsContract returned 0
+                // Method 2: Fallback to DocumentFile traversal on original tree URI if method 1 found 0 files
                 if (videoFiles.isEmpty() && rootUri.scheme == "content") {
+                    Log.d(TAG, "Native SAF query yielded 0 files. Trying DocumentFile fallback on original tree URI...")
                     val rootDoc = DocumentFile.fromTreeUri(context, rootUri)
                     if (rootDoc != null && rootDoc.exists()) {
                         traverseDocumentFile(rootDoc, videoFiles)
+                    } else {
+                        Log.e(TAG, "DocumentFile.fromTreeUri returned null or non-existent document for $rootUri")
                     }
                 }
 
@@ -86,7 +95,7 @@ class SafFolderScanner @Inject constructor(
             }
 
             val total = videoFiles.size
-            Log.d(TAG, "Scan complete for $uriString. Found $total video files.")
+            Log.d(TAG, "Scan complete for $uriString. Total video files found: $total")
 
             if (total == 0) {
                 emit(ScanProgress(isScanning = false, currentFile = "Scan finished: 0 video files found in folder", filesProcessed = 0, totalFiles = 0))
@@ -128,7 +137,6 @@ class SafFolderScanner @Inject constructor(
                         // 2. Automatic regex parsing
                         val parsed = file.parsedInfo
                         val searchTitle = parsed.cleanTitle
-                        Log.d(TAG, "Parsed title for ${file.fileName}: '$searchTitle' (year=${parsed.year}, isTv=${parsed.isTvShow})")
 
                         if (parsed.isTvShow) {
                             val searchResult = tmdbRepository.searchTvShows(searchTitle, parsed.year)
@@ -214,15 +222,16 @@ class SafFolderScanner @Inject constructor(
     // Method 1: Native SAF DocumentsContract Cursor Query
     private fun scanSafTree(treeUri: Uri, result: MutableList<ScannedVideoFile>) {
         try {
-            val treeDocId = DocumentsContract.getTreeDocumentId(treeUri) ?: return
-            Log.d(TAG, "scanSafTree treeDocId='$treeDocId'")
-            scanSafDirectory(treeUri, treeDocId, result)
+            val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+            Log.d(TAG, "Root Tree Document ID: '$rootDocId'")
+            scanSafDirectory(treeUri, rootDocId, result)
         } catch (e: Exception) {
-            Log.e(TAG, "Error in scanSafTree", e)
+            Log.e(TAG, "Error obtaining tree document ID for $treeUri", e)
         }
     }
 
     private fun scanSafDirectory(treeUri: Uri, docId: String, result: MutableList<ScannedVideoFile>) {
+        // ALWAYS pass original treeUri as first parameter
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
         val projection = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
@@ -233,6 +242,12 @@ class SafFolderScanner @Inject constructor(
 
         try {
             context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                Log.d(TAG, "Cursor count for directory docId '$docId': ${cursor.count}")
+                if (cursor.count == 0) {
+                    Log.d(TAG, "Directory '$docId' is empty")
+                    return
+                }
+
                 val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                 val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                 val mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
@@ -245,8 +260,10 @@ class SafFolderScanner @Inject constructor(
                     val size = if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L
 
                     val isDirectory = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+                    Log.d(TAG, "Found -> Doc ID: '$childDocId' | Name: '$name' | MIME: '$mimeType' | isDir: $isDirectory")
 
                     if (isDirectory) {
+                        // Recurse using original treeUri and child document ID
                         scanSafDirectory(treeUri, childDocId, result)
                     } else {
                         val ext = name.substringAfterLast('.', "").lowercase()
@@ -255,9 +272,10 @@ class SafFolderScanner @Inject constructor(
                         val isVideo = isVideoExt || isVideoMime || (ext.length in 2..4 && ext != "txt" && ext != "srt" && ext != "jpg" && ext != "png" && ext != "nfo")
 
                         if (isVideo) {
+                            // ALWAYS pass original treeUri as first parameter
                             val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
                             val parsed = parser.parse(name)
-                            Log.d(TAG, "SafNative found video: '$name' (size=$size)")
+                            Log.d(TAG, "ACCEPTED VIDEO -> Name: '$name' | Doc ID: '$childDocId' | Size: $size bytes")
                             result.add(
                                 ScannedVideoFile(
                                     uri = fileUri,
@@ -267,19 +285,22 @@ class SafFolderScanner @Inject constructor(
                                     parsedInfo = parsed
                                 )
                             )
+                        } else {
+                            Log.d(TAG, "SKIPPED NON-VIDEO -> Name: '$name' | Ext: '$ext'")
                         }
                     }
                 }
-            }
+            } ?: Log.e(TAG, "Null cursor returned when querying $childrenUri")
         } catch (e: Exception) {
             Log.e(TAG, "Error querying SAF directory '$docId'", e)
         }
     }
 
-    // Method 2: DocumentFile Traversal
+    // Method 2: DocumentFile Traversal (Uses original tree URI, never calls fromTreeUri on child URI)
     private fun traverseDocumentFile(dir: DocumentFile, result: MutableList<ScannedVideoFile>) {
         try {
             val files = dir.listFiles()
+            Log.d(TAG, "DocumentFile listing '${dir.name}': ${files.size} items")
             for (file in files) {
                 val name = file.name ?: continue
                 if (file.isDirectory) {
