@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,19 +38,20 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.cinemagallery.domain.model.MediaItem
 import com.cinemagallery.ui.components.ExternalPlayerButton
+import com.cinemagallery.ui.theme.CinemaGalleryTheme
 import com.cinemagallery.util.PlayerUtils
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MovieDetailsScreen(
     viewModel: MovieDetailViewModel,
@@ -57,6 +59,22 @@ fun MovieDetailsScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    MovieDetailsContent(
+        state = state,
+        onBackClick = onBackClick,
+        onPlayClick = { filePath -> PlayerUtils.playMediaInExternalPlayer(context, filePath) },
+        onToggleWatched = viewModel::toggleWatched
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MovieDetailsContent(
+    state: MovieDetailUiState,
+    onBackClick: () -> Unit,
+    onPlayClick: (String) -> Unit,
+    onToggleWatched: () -> Unit
+) {
     val movie = state.movie
 
     Scaffold(
@@ -91,7 +109,6 @@ fun MovieDetailsScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
-                // Hero Backdrop Banner
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -104,13 +121,6 @@ fun MovieDetailsScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
-                    } else if (!movie.posterPath.isNullOrBlank()) {
-                        AsyncImage(
-                            model = movie.posterPath,
-                            contentDescription = movie.title,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
                     } else {
                         Box(
                             modifier = Modifier
@@ -119,7 +129,6 @@ fun MovieDetailsScreen(
                         )
                     }
 
-                    // Gradient Overlay
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -135,16 +144,12 @@ fun MovieDetailsScreen(
                     )
                 }
 
-                // Main Details Container
                 Column(
                     modifier = Modifier
                         .padding(horizontal = 20.dp)
                         .offset(y = (-40).dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        // Poster Image
+                    Row(verticalAlignment = Alignment.Bottom) {
                         Card(
                             modifier = Modifier
                                 .width(120.dp)
@@ -172,14 +177,11 @@ fun MovieDetailsScreen(
                                 )
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "${movie.year ?: "—"}  •  ${movie.runtimeMinutes} min",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                )
-                            }
+                            Text(
+                                text = "${movie.year ?: "—"}  •  ${movie.runtimeMinutes} min",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
@@ -201,7 +203,6 @@ fun MovieDetailsScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Genres
                     Row(modifier = Modifier.fillMaxWidth()) {
                         movie.genres.forEach { genre ->
                             SuggestionChip(
@@ -214,19 +215,15 @@ fun MovieDetailsScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Primary Action: Play in External Player
                     ExternalPlayerButton(
-                        onClick = {
-                            PlayerUtils.playMediaInExternalPlayer(context, movie.filePath)
-                        },
+                        onClick = { onPlayClick(movie.filePath) },
                         modifier = Modifier.fillMaxWidth()
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Secondary Action: Watched Toggle
                     OutlinedButton(
-                        onClick = { viewModel.toggleWatched() },
+                        onClick = onToggleWatched,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (movie.isWatched) {
@@ -244,25 +241,18 @@ fun MovieDetailsScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Overview
                     Text(
                         text = "Plot Overview",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
-                        )
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = movie.overview,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            lineHeight = 22.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp)
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // File Information Card
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -286,10 +276,8 @@ fun MovieDetailsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = movie.filePath.substringAfterLast('/'),
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = FontWeight.Medium
-                                    )
+                                    text = movie.filePath.substringAfterLast('/', movie.filePath),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
                                 )
                                 Text(
                                     text = "Size: ${movie.fileSizeFormatted}",
@@ -304,5 +292,35 @@ fun MovieDetailsScreen(
                 }
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun MovieDetailsScreenPreview() {
+    CinemaGalleryTheme {
+        MovieDetailsContent(
+            state = MovieDetailUiState(
+                movie = MediaItem.Movie(
+                    id = "m1",
+                    tmdbId = 157336,
+                    title = "Interstellar",
+                    year = 2014,
+                    posterPath = null,
+                    backdropPath = null,
+                    overview = "The adventures of a group of explorers who make use of a newly discovered wormhole.",
+                    rating = 8.6,
+                    genres = listOf("Sci-Fi", "Drama"),
+                    runtimeMinutes = 169,
+                    filePath = "/Movies/Interstellar.2014.1080p.mkv",
+                    fileSizeFormatted = "3.2 GB",
+                    isWatched = true
+                ),
+                isLoading = false
+            ),
+            onBackClick = {},
+            onPlayClick = {},
+            onToggleWatched = {}
+        )
     }
 }
