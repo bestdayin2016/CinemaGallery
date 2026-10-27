@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">CinemaGallery</string>
+    <string name="nav_library">Library</string>
+    <string name="nav_unmatched">Unmatched</string>
+    <string name="nav_settings">Settings</string>
+</resources>
