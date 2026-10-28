@@ -51,6 +51,7 @@ import com.cinemagallery.domain.model.MediaItem
 import com.cinemagallery.domain.model.MediaTypeFilter
 import com.cinemagallery.domain.model.SortOrder
 import com.cinemagallery.ui.components.MediaCard
+import com.cinemagallery.ui.components.MediaListItem
 import com.cinemagallery.ui.theme.CinemaGalleryTheme
 
 @Composable
@@ -257,22 +258,41 @@ fun LibraryContent(
                     }
                 }
             } else {
-                val gridCells = if (state.isGridView) GridCells.Fixed(2) else GridCells.Fixed(1)
-                LazyVerticalGrid(
-                    columns = gridCells,
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(
-                        items = state.mediaItems,
-                        key = { it.id }
-                    ) { item ->
-                        MediaCard(
-                            item = item,
-                            onClick = { onMediaClick(item) }
-                        )
+                if (state.isGridView) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(
+                            items = state.mediaItems,
+                            key = { it.id }
+                        ) { item ->
+                            MediaCard(
+                                item = item,
+                                onClick = { onMediaClick(item) }
+                            )
+                        }
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(1),
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(
+                            items = state.mediaItems,
+                            key = { it.id }
+                        ) { item ->
+                            MediaListItem(
+                                item = item,
+                                onClick = { onMediaClick(item) }
+                            )
+                        }
                     }
                 }
             }
