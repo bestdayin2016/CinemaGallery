@@ -7,6 +7,7 @@ import com.cinemagallery.domain.model.MediaItem
 import com.cinemagallery.domain.model.ScanProgress
 import com.cinemagallery.domain.repository.LibraryFolderRepository
 import com.cinemagallery.domain.repository.TmdbRepository
+import com.cinemagallery.ui.library.LibraryViewMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +21,7 @@ data class SettingsUiState(
     val folders: List<LibraryFolder> = emptyList(),
     val scanProgress: ScanProgress = ScanProgress(isScanning = false),
     val isTmdbApiKeyConfigured: Boolean = false,
+    val selectedViewMode: LibraryViewMode = LibraryViewMode.GRID,
     val testQuery: String = "Interstellar",
     val testResults: List<MediaItem.Movie> = emptyList(),
     val isTestSearching: Boolean = false,
@@ -73,6 +75,10 @@ class SettingsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(scanProgress = progress)
             }
             .launchIn(viewModelScope)
+    }
+
+    fun setLibraryViewMode(mode: LibraryViewMode) {
+        _uiState.value = _uiState.value.copy(selectedViewMode = mode)
     }
 
     fun onTestQueryChange(query: String) {

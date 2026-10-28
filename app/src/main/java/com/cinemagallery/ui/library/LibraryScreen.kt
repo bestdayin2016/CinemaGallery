@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +53,7 @@ import com.cinemagallery.domain.model.MediaTypeFilter
 import com.cinemagallery.domain.model.SortOrder
 import com.cinemagallery.ui.components.MediaCard
 import com.cinemagallery.ui.components.MediaListItem
+import com.cinemagallery.ui.components.StackView
 import com.cinemagallery.ui.theme.CinemaGalleryTheme
 
 @Composable
@@ -66,7 +68,8 @@ fun LibraryScreen(
         onMediaTypeSelect = viewModel::onMediaTypeSelect,
         onSortOrderSelect = viewModel::onSortOrderSelect,
         onToggleOnlyUnwatched = viewModel::onToggleOnlyUnwatched,
-        onToggleViewMode = viewModel::toggleViewMode,
+        onToggleViewMode = viewModel::cycleViewMode,
+        onSelectMediaId = viewModel::setSelectedMediaId,
         onMediaClick = onMediaClick
     )
 }
@@ -80,6 +83,7 @@ fun LibraryContent(
     onSortOrderSelect: (SortOrder) -> Unit,
     onToggleOnlyUnwatched: () -> Unit,
     onToggleViewMode: () -> Unit,
+    onSelectMediaId: (String) -> Unit,
     onMediaClick: (MediaItem) -> Unit
 ) {
     var isSearchExpanded by remember { mutableStateOf(false) }
@@ -162,7 +166,11 @@ fun LibraryContent(
                     }
                     IconButton(onClick = onToggleViewMode) {
                         Icon(
-                            imageVector = if (state.isGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                            imageVector = when (state.viewMode) {
+                                LibraryViewMode.GRID -> Icons.Default.ViewList
+                                LibraryViewMode.HORIZONTAL -> Icons.Default.Layers
+                                LibraryViewMode.STACK -> Icons.Default.GridView
+                            },
                             contentDescription = "Toggle view mode"
                         )
                     }
@@ -245,7 +253,7 @@ fun LibraryContent(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "No media found",
+                            text = "No titles match your filters",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -258,41 +266,52 @@ fun LibraryContent(
                     }
                 }
             } else {
-                if (state.isGridView) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(
-                            items = state.mediaItems,
-                            key = { it.id }
-                        ) { item ->
-                            MediaCard(
-                                item = item,
-                                onClick = { onMediaClick(item) }
-                            )
+                when (state.viewMode) {
+                    LibraryViewMode.GRID -> {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            contentPadding = PaddingValues(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(
+                                items = state.mediaItems,
+                                key = { it.id }
+                            ) { item ->
+                                MediaCard(
+                                    item = item,
+                                    onClick = { onMediaClick(item) }
+                                )
+                            }
                         }
                     }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(1),
-                        contentPadding = PaddingValues(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(
-                            items = state.mediaItems,
-                            key = { it.id }
-                        ) { item ->
-                            MediaListItem(
-                                item = item,
-                                onClick = { onMediaClick(item) }
-                            )
+                    LibraryViewMode.HORIZONTAL -> {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(1),
+                            contentPadding = PaddingValues(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(
+                                items = state.mediaItems,
+                                key = { it.id }
+                            ) { item ->
+                                MediaListItem(
+                                    item = item,
+                                    onClick = { onMediaClick(item) }
+                                )
+                            }
                         }
+                    }
+                    LibraryViewMode.STACK -> {
+                        StackView(
+                            items = state.mediaItems,
+                            selectedId = state.selectedMediaId,
+                            onMediaClick = onMediaClick,
+                            onIndexChanged = onSelectMediaId
+                        )
                     }
                 }
             }
@@ -344,6 +363,7 @@ fun LibraryScreenPreview() {
             onSortOrderSelect = {},
             onToggleOnlyUnwatched = {},
             onToggleViewMode = {},
+            onSelectMediaId = {},
             onMediaClick = {}
         )
     }

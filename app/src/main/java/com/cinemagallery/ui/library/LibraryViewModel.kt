@@ -19,11 +19,18 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class LibraryViewMode {
+    GRID,
+    HORIZONTAL,
+    STACK
+}
+
 data class LibraryUiState(
     val filter: LibraryFilter = LibraryFilter(),
     val mediaItems: List<MediaItem> = emptyList(),
     val isLoading: Boolean = false,
-    val isGridView: Boolean = true
+    val viewMode: LibraryViewMode = LibraryViewMode.GRID,
+    val selectedMediaId: String? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -45,8 +52,11 @@ class LibraryViewModel @Inject constructor(
                 getLibraryMediaUseCase(filter)
             }
             .onEach { items ->
+                val currentSelected = _uiState.value.selectedMediaId
+                val newSelected = if (items.any { it.id == currentSelected }) currentSelected else items.firstOrNull()?.id
                 _uiState.value = _uiState.value.copy(
                     mediaItems = items,
+                    selectedMediaId = newSelected,
                     isLoading = false
                 )
             }
@@ -70,8 +80,21 @@ class LibraryViewModel @Inject constructor(
         filterState.value = filterState.value.copy(onlyUnwatched = !current)
     }
 
-    fun toggleViewMode() {
-        _uiState.value = _uiState.value.copy(isGridView = !_uiState.value.isGridView)
+    fun cycleViewMode() {
+        val nextMode = when (_uiState.value.viewMode) {
+            LibraryViewMode.GRID -> LibraryViewMode.HORIZONTAL
+            LibraryViewMode.HORIZONTAL -> LibraryViewMode.STACK
+            LibraryViewMode.STACK -> LibraryViewMode.GRID
+        }
+        _uiState.value = _uiState.value.copy(viewMode = nextMode)
+    }
+
+    fun setViewMode(mode: LibraryViewMode) {
+        _uiState.value = _uiState.value.copy(viewMode = mode)
+    }
+
+    fun setSelectedMediaId(id: String) {
+        _uiState.value = _uiState.value.copy(selectedMediaId = id)
     }
 
     fun toggleMovieWatched(movieId: String, currentWatched: Boolean) {
