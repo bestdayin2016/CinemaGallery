@@ -24,6 +24,9 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -104,6 +107,8 @@ class SafFolderScanner @Inject constructor(
 
             emit(ScanProgress(isScanning = true, currentFile = "Found $total video files", filesProcessed = 0, totalFiles = total))
 
+            var tmdbNetworkAvailable = true
+
             for ((index, file) in videoFiles.withIndex()) {
                 Log.d(TAG, "Processing video file [${index + 1}/$total]: ${file.fileName}")
                 emit(
@@ -122,14 +127,26 @@ class SafFolderScanner @Inject constructor(
 
                         if (manualOverride != null) {
                             Log.d(TAG, "Applying manual override for ${file.fileName}: ${manualOverride.customTitle}")
+                            var match: MediaItem? = null
+                            if (tmdbNetworkAvailable) {
+                                val searchResult = if (manualOverride.isTvShow) {
+                                    tmdbRepository.searchTvShows(manualOverride.customTitle)
+                                } else {
+                                    tmdbRepository.searchMovies(manualOverride.customTitle)
+                                }
+                                if (searchResult.isFailure) {
+                                    val err = searchResult.exceptionOrNull()
+                                    if (err is SocketTimeoutException || err is UnknownHostException || err is ConnectException) {
+                                        tmdbNetworkAvailable = false
+                                    }
+                                }
+                                match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
+                            }
+
                             if (manualOverride.isTvShow) {
-                                val searchResult = tmdbRepository.searchTvShows(manualOverride.customTitle)
-                                val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
-                                insertOrUpdateTvShowEpisode(file, manualOverride.tmdbId, manualOverride.customTitle, file.parsedInfo, match)
+                                insertOrUpdateTvShowEpisode(file, manualOverride.tmdbId, manualOverride.customTitle, file.parsedInfo, match as? MediaItem.TvShow)
                             } else {
-                                val searchResult = tmdbRepository.searchMovies(manualOverride.customTitle)
-                                val match = searchResult.getOrNull()?.find { it.tmdbId == manualOverride.tmdbId }
-                                insertOrUpdateMovie(file, manualOverride.tmdbId, manualOverride.customTitle, match)
+                                insertOrUpdateMovie(file, manualOverride.tmdbId, manualOverride.customTitle, match as? MediaItem.Movie)
                             }
                             return@withContext
                         }
@@ -139,15 +156,25 @@ class SafFolderScanner @Inject constructor(
                         val searchTitle = parsed.cleanTitle
 
                         if (parsed.isTvShow) {
-                            val searchResult = tmdbRepository.searchTvShows(searchTitle, parsed.year)
-                            val matches = searchResult.getOrNull().orEmpty()
+                            var matches: List<MediaItem.TvShow> = emptyList()
+                            if (tmdbNetworkAvailable) {
+                                val searchResult = tmdbRepository.searchTvShows(searchTitle, parsed.year)
+                                if (searchResult.isFailure) {
+                                    val err = searchResult.exceptionOrNull()
+                                    if (err is SocketTimeoutException || err is UnknownHostException || err is ConnectException) {
+                                        tmdbNetworkAvailable = false
+                                        Log.w(TAG, "Network timeout reaching TMDB. Switching remaining files in scan to fast local mode.")
+                                    }
+                                }
+                                matches = searchResult.getOrNull().orEmpty()
+                            }
 
                             if (matches.isNotEmpty()) {
                                 val bestMatch = matches.first()
                                 Log.d(TAG, "Matched TV show: ${bestMatch.title} (tmdbId=${bestMatch.tmdbId})")
                                 insertOrUpdateTvShowEpisode(file, bestMatch.tmdbId, bestMatch.title, parsed, bestMatch)
                             } else {
-                                Log.w(TAG, "No TMDB match for TV show: $searchTitle. Adding to unmatched.")
+                                // Add to local unmatched files
                                 db.unmatchedFileDao().insertUnmatchedFiles(
                                     listOf(
                                         UnmatchedFileEntity(
@@ -165,15 +192,25 @@ class SafFolderScanner @Inject constructor(
                                 )
                             }
                         } else {
-                            val searchResult = tmdbRepository.searchMovies(searchTitle, parsed.year)
-                            val matches = searchResult.getOrNull().orEmpty()
+                            var matches: List<MediaItem.Movie> = emptyList()
+                            if (tmdbNetworkAvailable) {
+                                val searchResult = tmdbRepository.searchMovies(searchTitle, parsed.year)
+                                if (searchResult.isFailure) {
+                                    val err = searchResult.exceptionOrNull()
+                                    if (err is SocketTimeoutException || err is UnknownHostException || err is ConnectException) {
+                                        tmdbNetworkAvailable = false
+                                        Log.w(TAG, "Network timeout reaching TMDB. Switching remaining files in scan to fast local mode.")
+                                    }
+                                }
+                                matches = searchResult.getOrNull().orEmpty()
+                            }
 
                             if (matches.isNotEmpty()) {
                                 val bestMatch = matches.first()
                                 Log.d(TAG, "Matched Movie: ${bestMatch.title} (tmdbId=${bestMatch.tmdbId})")
                                 insertOrUpdateMovie(file, bestMatch.tmdbId, bestMatch.title, bestMatch)
                             } else {
-                                Log.w(TAG, "No TMDB match for Movie: $searchTitle. Adding to unmatched.")
+                                // Add to local unmatched files
                                 db.unmatchedFileDao().insertUnmatchedFiles(
                                     listOf(
                                         UnmatchedFileEntity(
