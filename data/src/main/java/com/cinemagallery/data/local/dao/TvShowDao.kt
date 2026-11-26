@@ -37,4 +37,13 @@ interface TvShowDao {
 
     @Query("UPDATE episodes SET isWatched = :isWatched WHERE tvShowId = :tvShowId AND seasonNumber = :seasonNumber")
     suspend fun updateSeasonWatchedStatus(tvShowId: String, seasonNumber: Int, isWatched: Boolean)
+
+    @Query("DELETE FROM tv_shows WHERE id = :tvShowId")
+    suspend fun deleteTvShow(tvShowId: String)
+
+    @Query("DELETE FROM seasons WHERE tvShowId = :tvShowId")
+    suspend fun deleteSeasonsForShow(tvShowId: String)
+
+    @Query("DELETE FROM episodes WHERE tvShowId = :tvShowId")
+    suspend fun deleteEpisodesForShow(tvShowId: String)
 }

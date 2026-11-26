@@ -164,4 +164,14 @@ class MediaRepositoryImpl @Inject constructor(
     ) {
         tvShowDao.updateSeasonWatchedStatus(tvShowId, seasonNumber, isWatched)
     }
+
+    override suspend fun deleteMediaItem(id: String, isTvShow: Boolean) {
+        if (isTvShow) {
+            tvShowDao.deleteEpisodesForShow(id)
+            tvShowDao.deleteSeasonsForShow(id)
+            tvShowDao.deleteTvShow(id)
+        } else {
+            movieDao.deleteMovie(id)
+        }
+    }
 }

@@ -65,6 +65,9 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
+    // Networking & DNS
+    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
+
     // Coil
     implementation(libs.coil.compose)
 

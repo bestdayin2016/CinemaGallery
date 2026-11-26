@@ -20,4 +20,7 @@ interface MovieDao {
 
     @Query("UPDATE movies SET isWatched = :isWatched WHERE id = :movieId")
     suspend fun updateWatchedStatus(movieId: String, isWatched: Boolean)
+
+    @Query("DELETE FROM movies WHERE id = :movieId")
+    suspend fun deleteMovie(movieId: String)
 }

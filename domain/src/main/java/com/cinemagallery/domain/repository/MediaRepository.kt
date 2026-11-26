@@ -15,4 +15,5 @@ interface MediaRepository {
     suspend fun toggleMovieWatched(movieId: String, isWatched: Boolean)
     suspend fun toggleEpisodeWatched(episodeId: String, isWatched: Boolean)
     suspend fun toggleSeasonWatched(tvShowId: String, seasonNumber: Int, isWatched: Boolean)
+    suspend fun deleteMediaItem(id: String, isTvShow: Boolean)
 }
